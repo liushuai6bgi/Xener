@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xener"
+version = "0.1.0"
+description = "Single-cell cross-species cell type annotation tool using knowledge graph."
+requires-python = ">=3.11"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Xener Team"},
+    {name = "Shuai Liu", email = "liushuai6@genomics.cn"},
+    {name = "Huan Zhang", email = "zhanghuan4@genomics.cn"},
+    {name = "Lei Cao", email = "caolei2@genomics.cn"},
+    {name = "Shuangsang Fang", email = "fangshuangsang@genomics.cn"}
+]
+keywords = ["single-cell", "cell-type-annotation", "knowledge-graph", "bioinformatics"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+dependencies = [
+    "numpy>=2.2",
+    "scanpy>=1.11",
+    "pandas>=2.3",
+    "networkx>=3.5",
+    "scipy>=1.16",
+    "psutil>=5.9",
+    "biopython>=1.85",
+    "openai>=1.102",
+    "neo4j>=5.28",
+    "anndata>=0.12",
+    "h5py>=3.14",
+    "langchain-openai>=0.3.32"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=3.0.0",
+    "black>=22.0.0",
+    "flake8>=4.0.0",
+    "mypy>=0.950",
+]
+
+[project.urls]
+Homepage = "https://xenor.dcs.cloud/"
+
+[project.entry-points."xener"]
+xener = "xener.core"
+
+[tool.setuptools]
+packages = ["xener", "xener.utils", "xener.utils.kg", "xener.utils.blast", "xener.utils.h5ad"]
