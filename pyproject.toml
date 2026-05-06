@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Single-cell cross-species cell type annotation tool using knowledge graph."
 requires-python = ">=3.11"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
     {name = "Xener Team"},
     {name = "Shuai Liu", email = "liushuai6@genomics.cn"},
@@ -51,6 +51,7 @@ dev = [
 
 [project.urls]
 Homepage = "https://xenor.dcs.cloud/"
+GitHub = "https://github.com/liushuai6bgi/Xener"
 
 [project.entry-points."xener"]
 xener = "xener.core"

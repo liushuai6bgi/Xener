@@ -79,4 +79,6 @@ annor.refine_single_cluster(adata, topk_markers,
 
 ## Links
 
-Homepage: https://xenor.dcs.cloud/
+[Homepage](https://xenor.dcs.cloud/): https://xenor.dcs.cloud/
+
+[pypi](https://pypi.org/project/xener/): https://pypi.org/project/xener
