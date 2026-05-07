@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 import networkx as nx
+from .logger import logger
 
 def name2path(path:str, postfix:list[str]) -> dict[str, str]:
     """
