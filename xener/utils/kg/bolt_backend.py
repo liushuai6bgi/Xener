@@ -22,7 +22,6 @@ class KG_Neo4j_BoltBackend(KGBackend):
         
     def _build_cypher_gene2celltype_path(
         self,
-        resolution: Literal["Cell", "Tissue"],
         organ: str | list = None,
         genes: list[str] = None,
         celltypes: list[str] = None,
@@ -32,7 +31,6 @@ class KG_Neo4j_BoltBackend(KGBackend):
         Can filter by cell type and gene lists.
 
         Args:
-            resolution: Cell type resolution.
             organ: Organ name.
             genes: List of gene names.
             celltypes: List of cell type names.
@@ -40,14 +38,14 @@ class KG_Neo4j_BoltBackend(KGBackend):
         Returns:
             Cypher query string.
         """
-        if resolution == "Cell":
-            cypher = "MATCH path = (a:Gene)-[b:marker_of]->(c:Ontology) "
-        elif resolution == "Tissue":
-            cypher = (
-                "MATCH path = (a:Gene)-[b:marker_of]->(c:Ontology)-[d:ontology_relation1..2]-(e:Ontology) "
-            )
-        else:
-            raise ValueError("resolution must be Cell or Tissue")
+        # if resolution == "Cell":
+        cypher = "MATCH path = (a:Gene)-[b:marker_of]->(c:Ontology) "
+        # elif resolution == "Tissue":
+        #     cypher = (
+        #         "MATCH path = (a:Gene)-[b:marker_of]->(c:Ontology)-[d:ontology_relation1..2]-(e:Ontology) "
+        #     )
+        # else:
+        #     raise ValueError("resolution must be Cell or Tissue")
 
         WHERE = []
         if genes:
@@ -133,7 +131,6 @@ class KG_Neo4j_BoltBackend(KGBackend):
         self,
         homolo_nodes: list[str] = None,
         organ: str = None,
-        resolution: Literal["Cell", "Tissue"] = "Cell",
         candidate_type: list[str] = None,
     ) -> tuple[list[str], list[str], sp.csr_matrix]:
         """
@@ -142,7 +139,6 @@ class KG_Neo4j_BoltBackend(KGBackend):
         Args:
             homolo_nodes: List of homology nodes.
             organ: Organ name.
-            resolution: Annotation granularity ('Cell' or 'Tissue').
             candidate_type: Candidate cell types.
 
         Returns:
@@ -151,7 +147,7 @@ class KG_Neo4j_BoltBackend(KGBackend):
             matrix: Adjacency sparse matrix.
         """
         cypher = self._build_cypher_gene2celltype_path(
-            resolution, organ, homolo_nodes, candidate_type
+            organ, homolo_nodes, candidate_type
         )
         source_nodes = []
         target_nodes = []
@@ -241,13 +237,12 @@ class KG_Neo4j_BoltBackend(KGBackend):
             DataFrame with columns: species, organ, cell.
         """
         species_organ_cell = []
-        cypher = "MATCH (a:Gene)-[b]->(c:Ontology) RETURN DISTINCT c"
+        cypher = "MATCH (a:Gene)-[b]->(c:Ontology) RETURN DISTINCT a.Species,c.Organ,c.Name"
         with self.driver.session() as session:
-            for value in session.run(cypher).values():
-                cell_name = value[0]["Name"]
-                organ_names = value[0]["Organ"].split("|")
-                species_name = value[0]["Species_type"]
-                for organ_name in organ_names:
+            for species_name, organ_names, cell_name in session.run(cypher).values():
+                species_name = species_name.strip().replace(' ','_')
+                organ_name_list = organ_names.split("|")
+                for organ_name in organ_name_list:
                     species_organ_cell.append([species_name, organ_name, cell_name])
         species_organ_cell = pd.DataFrame(
             species_organ_cell, columns=["species", "organ", "cell"]

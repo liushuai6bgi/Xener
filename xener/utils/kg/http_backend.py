@@ -35,7 +35,9 @@ class KG_HttpBackend(KGBackend):
         """Send an HTTP request."""
         url = f"{self.url}{path}"
         response = self._session.request(method, url, timeout=30, **kwargs)
-        response.raise_for_status()
+        if not response.ok:
+            detail = response.json().get("detail", response.text)
+            raise requests.HTTPError(detail, response=response)
         return response
 
 
@@ -56,19 +58,18 @@ class KG_HttpBackend(KGBackend):
         self,
         homolo_nodes: list[str] = None,
         organ: str = None,
-        resolution: Literal["Cell", "Tissue"] = "Cell",
         candidate_type: list[str] = None,
     ) -> tuple[list[str], list[str], sp.csr_matrix]:
         """Retrieve gene-to-celltype relationships."""
-        # GET /api/kg/gene2celltype
-        params = {"resolution": resolution}
+        # POST /api/kg/gene2celltype
+        params = {}
         if homolo_nodes:
-            params["homolo_nodes"] = ",".join(homolo_nodes)
+            params["homolo_nodes"] = homolo_nodes
         if organ:
             params["organ"] = organ
         if candidate_type:
-            params["candidate_type"] = ",".join(candidate_type)
-        resp = self._request("GET", "/api/kg/gene2celltype", params=params)
+            params["candidate_type"] = candidate_type
+        resp = self._request("POST", "/api/kg/gene2celltype", json=params)
         data = resp.json()
         gene_nodes = data["genes"]
         cellType_nodes = data["celltypes"]
@@ -84,8 +85,8 @@ class KG_HttpBackend(KGBackend):
     ) -> tuple[sp.csr_matrix, list[str]]:
         """Get the relationship matrix between cell types."""
         # POST /api/kg/celltype2celltype
-        params = {"nodes": ",".join(nodes), "symmetric": symmetric, "max_step": max_step}
-        resp = self._request("GET", "/api/kg/celltype2celltype", params=params)
+        params = {"nodes": nodes, "symmetric": symmetric, "max_step": max_step}
+        resp = self._request("POST", "/api/kg/celltype2celltype", json=params)
         data = resp.json()
         new_nodes = data["nodes"]
         matrix_data = data["matrix"]
@@ -99,7 +100,7 @@ class KG_HttpBackend(KGBackend):
         """Return the species-organ-celltype relationship table."""
         # GET /api/kg/species-organ-cell
         resp = self._request("GET", "/api/kg/species-organ-cell")
-        data = resp.json()
+        data = resp.json()['data']
         return pd.DataFrame(data, columns=["species", "organ", "cell"]).drop_duplicates()
 
     def close(self):

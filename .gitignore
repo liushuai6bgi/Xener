@@ -5,3 +5,5 @@
 !xener/
 !xener/**/
 !xener/**/*.py
+!skill/
+!skill/**/*

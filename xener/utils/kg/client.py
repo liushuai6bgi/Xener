@@ -80,11 +80,10 @@ class KGClient(KGBackend):
         self,
         homolo_nodes: list[str] = None,
         organ: str = None,
-        resolution: Literal["Cell", "Tissue"] = "Cell",
         candidate_type: list[str] = None,
     ) -> tuple[list[str], list[str], "sp.csr_matrix"]:
         return self._backend.get_gene2celltype_kg(
-            homolo_nodes, organ, resolution, candidate_type
+            homolo_nodes, organ, candidate_type
         )
 
     def get_celltype2celltype_kg(

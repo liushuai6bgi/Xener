@@ -8,10 +8,10 @@ _XENER_DATA_DIR = Path.home() / ".xener" / "data"
 def _ensure_data(DATA_KEY:str=None, force_update:bool=False):
     assert DATA_KEY is None or DATA_KEY in _DATA_URL.keys(), "Invalid data key"
     
+    _XENER_DATA_DIR.mkdir(parents=True, exist_ok=True)
     if DATA_KEY is None:
         if _XENER_DATA_DIR.exists() and any(_XENER_DATA_DIR.iterdir()):
             return
-        _XENER_DATA_DIR.mkdir(parents=True, exist_ok=True)
         print(f"[xener] Dependence on missing data, currently downloading dependent data...")
         for name, url in _DATA_URL.items():
             data_path = _XENER_DATA_DIR / name

@@ -58,7 +58,7 @@ gene_homolo_weight = annor.mapping(marker_weight, non_model_fasta, model_species
 topk_markers = annor.get_topk_gene(gene_homolo_weight, k=30)
 # Only the top 30 genes will be retained for the subsequent steps.
 
-cluster2celltype, _, _, _, _ = self.cell_annotation(
+cluster2celltype, _, celltype_weight, _, _ = annor.cell_annotation(
             topk_markers, annotation_info_path, organ)
 ```
 
@@ -66,7 +66,7 @@ cluster2celltype, _, _, _, _ = self.cell_annotation(
 
 ```python
 cluster_id = 0
-candidate_celltype = ['type1', 'type2']
+candidate_celltype = ['type1', 'type2']# Only support the values that appear in celltype_weight[celltype_weight['cluster'] == cluster_id]['celltype'].unique()
 key_added = 'xener_refine'
 moranI_threshold = 0.5
 # moranI_threshold used for gene screening, the effective value ranges from [-1, 1]. The closer to 1, the stricter it is. If an invalid value is input, the screening step will be skipped.
@@ -81,4 +81,6 @@ annor.refine_single_cluster(adata, topk_markers,
 
 [Homepage](https://xenor.dcs.cloud/): https://xenor.dcs.cloud/
 
-[pypi](https://pypi.org/project/xener/): https://pypi.org/project/xener
+[PyPI](https://pypi.org/project/xener/): https://pypi.org/project/xener
+
+[Github](https://github.com/liushuai6bgi/Xener): https://github.com/liushuai6bgi/Xener

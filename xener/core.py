@@ -378,13 +378,12 @@ class Xener:
         return blast_result_with_weight
 
     def cell_annotation(self, blast_result, 
-            outdir:Path, organ=None, threshold:int=None, 
-            resolution:Literal['Cell', 'Tissue']='Cell', mode:Literal['node','path']='node', decay_factor:float=0.7) -> tuple[dict[str, str], pd.DataFrame, pd.DataFrame]:
+            outdir:Path, organ=None, threshold:int=None, candidate_annotation:list[str]=None,
+            mode:Literal['node','path']='node', decay_factor:float=0.7) -> tuple[dict[str, str], pd.DataFrame, pd.DataFrame]:
         '''
         Annotate each cell cluster and save celltype weight information for each cluster.
         Parameters:
             blast_result (pandas.DataFrame): BLAST result. Key `group` contains cluster information. Key `gene` contains gene names. Key `homolo` contains BLAST homologous genes. Key `weight` contains gene weights. Key `pct` contains confidence between homologous gene and gene.
-            resolution (str): Annotation granularity
             organ (str, optional): Organ name. Defaults to None
             threshold (int, optional): Threshold for filtering cell types. Defaults to None
             candidate_annotation (list[str], optional): Candidate cell types. Defaults to None
@@ -415,8 +414,8 @@ class Xener:
             logger.info('processing cluster %s', group)
             cluster2celltype[group], cluster2max_initweight_celltype[group], celltypes, weights, init_weights,\
                   genecount_graph, genecount_KG, homolo2celltype, gene2celltype_matrix = self.cell_annotation_cluster_singletype(
-                blast_result[blast_result['group'] == group], resolution, 
-                f'cluster_{group}', outdir, organ, candidate_annotation=None, 
+                blast_result[blast_result['group'] == group],  
+                f'cluster_{group}', outdir, organ, candidate_annotation, 
                 threshold=threshold, mode=mode, decay_factor=decay_factor)
 
             cluster_list += [group] * len(celltypes)
@@ -438,8 +437,7 @@ class Xener:
         return cluster2celltype, cluster2max_initweight_celltype, celltype_weight, cluster_celltype_ann, homolo2celltype
 
     def cell_annotation_cluster_singletype(self, blast_result:pd.DataFrame, 
-            resolution:Literal['Cell', 'Tissue'], output_prefix, outdir:Path, 
-            organ=None, candidate_annotation:list[str]=None, 
+            output_prefix, outdir:Path, organ=None, candidate_annotation:list[str]=None, 
             threshold:int=None,return_genecount_graph=True, return_genecount_KG=True,
             mode:Literal['node','path']='node', decay_factor:float=0.9
         ) -> tuple[str, list[str], list[float]]:
@@ -447,7 +445,6 @@ class Xener:
         Annotate a single cluster with cell types.
         Parameters:
             blast_result (pd.DataFrame): BLAST result for a single cluster. Key `group` contains cluster information. Key `gene` contains gene names. Key `homolo` contains BLAST homologous genes. Key `weight` contains gene weights. Key `pct` contains confidence between homologous gene and gene.
-            resolution (str): Annotation granularity
             organ (str, optional): Organ name. Defaults to None
             candidate_annotation (list[str], optional): Candidate cell types to constrain knowledge graph query results. Defaults to None
             threshold (int, optional): Threshold for filtering candidate types using normal distribution of cell type weights
@@ -470,7 +467,7 @@ class Xener:
         # Query knowledge graph based on homologs
         homolo_nodes = blast_result['homolo'].unique().tolist()
         _, celltype_nodes, homolo2celltype_matrix = self.KG.get_gene2celltype_kg(
-            homolo_nodes, organ, resolution, candidate_type=candidate_annotation)# Do not limit when querying knowledge graph
+            homolo_nodes, organ, candidate_type=candidate_annotation)# Do not limit when querying knowledge graph
 
         # Decay the relationship between homologous genes and cell types; the more cell types connected to a homologous gene, the less distinguishable they are, and the more decay is applied
         sum_result = homolo2celltype_matrix.sum(axis=1)
@@ -796,6 +793,8 @@ class Xener:
         if celltype_geneCount_gene is None:
             # Get mapping from homologous gene to marker
             homolo2gene = {}
+            group_gene_homolo_weight['group'] = group_gene_homolo_weight['group'].astype(str)
+            group_gene_homolo_weight = group_gene_homolo_weight[group_gene_homolo_weight['group'] == str(cluster_id)]
             group_gene_homolo_weight.apply(lambda x: homolo2gene.update({x['homolo']: x['gene']}), axis=1)
             # Look up marker genes in knowledge graph for each cell type
             source, target, matrix = self.KG.get_gene2celltype_kg(
@@ -892,7 +891,8 @@ class Xener:
                     # Use weights
                     score =  to_refine[:,goal_gene].X.mean(axis=1) \
                         - to_refine[:,list(gene_set4refine)].X.mean(axis=1)
-                    score = to_refine.obsp['connectivities'] @ score / to_refine.obsp['connectivities'].sum(axis=1)
+                    connectivities = to_refine.obsp['connectivities']
+                    score = connectivities / connectivities.sum(axis=1) @ score
                     to_refine.obs['score'] = score
 
                 mean_exp = adata[:,goal_gene].X.mean(axis=1)
@@ -919,8 +919,11 @@ class Xener:
             exps = np.array(exps)
             # Remove extra dimensions
             exps = np.squeeze(exps)
-            exps = adata_sub.obsp['connectivities'] @ exps.T / adata_sub.obsp['connectivities'].sum(axis=1)
-            type_id = np.argmax(exps, axis=1)
+            connectivities = adata_sub.obsp['connectivities']
+            connectivities_sum = connectivities.sum(axis=1)
+            exps = connectivities / connectivities_sum @ exps.T
+            type_id = np.argmax(exps, axis=1, keepdims=False)
+            type_id = np.squeeze(type_id)
             adata_sub.obs[key_added] = [celltype_geneCount_gene4reine[i][0] for i in type_id]
 
         logger.info('refine_single_cluster %s total: %s', cluster_id, adata_sub.obs[key_added].unique().tolist())
