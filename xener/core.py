@@ -54,6 +54,9 @@ class Xener:
             blastdb_path (str): Path to the existing BLAST database
             blastp_result_path (str): Path to BLASTP result files
         '''
+        _ensure_data(DATA_KEY='default_run_conf.yaml')
+        with open(_XENER_DATA_DIR / 'default_run_conf.yaml', 'r', encoding='utf-8') as f:
+            self._default_config = yaml.load(f, Loader=yaml.FullLoader)
         if blastdb_path is None:
             self.blastdb_path = _XENER_DATA_DIR / Path('blastdb/prot')
             if not self.blastdb_path.exists():
@@ -69,128 +72,148 @@ class Xener:
         self.KG = KGClient(**kg_kwargs)
         logger.info('Xener initialized!')
 
-    def run_from_yaml(self, yaml_file:str, Resource_occupancy_record:dict=None, save=True, configs:dict={}) -> dict:
+    def run_from_yaml(self, yaml_file:str, save=True, configs:dict={}) -> dict:
         '''
         Encapsulates the entire workflow for testing.
         Parameters:
             yaml_file (str): Path to the YAML configuration file
-            Resource_occupancy_record (dict): Record of resource usage. If not None, should contain keys: steps, cpu_time, and memory, with corresponding values as lists.
             save (bool): Whether to save intermediate results (used for subsequent analysis)
             configs (dict): Parameters in the configuration file will be updated, but the file content remains unchanged.
         Returns:
             dict: cluster2celltype mapping
             dict: cluster2max_initweight_celltype mapping
         '''
-        process = psutil.Process(os.getpid())
-        def recorder(phase:str):
-            Resource_occupancy_record['steps'].append(phase)
-            Resource_occupancy_record['cpu_time'].append(time.process_time())
-            Resource_occupancy_record['memory'].append(process.memory_info().rss / 1024 / 1024)
-            
-        if Resource_occupancy_record:
-            recorder('init')
-
-        _ensure_data(DATA_KEY='default_run_conf.yaml')
-        with open(_XENER_DATA_DIR / 'default_run_conf.yaml', 'r', encoding='utf-8') as f:
-            config = yaml.load(f, Loader=yaml.FullLoader)
+        config = self._default_config.copy()
         with open(yaml_file, 'r', encoding='utf-8') as f:
             config_from_yaml = yaml.load(f, Loader=yaml.FullLoader)
         config.update(config_from_yaml)
         config.update(configs)
 
-        if 'outdir' not in config:
-            raise 'outdir not found in yaml file!'
-        os.makedirs(config['outdir'], exist_ok=True)
-        self.outdir = Path(config['outdir'])
+        result = self(save=save,**config)
 
-        if isinstance(config.get('marker_gene', None), str) and os.path.exists(config['marker_gene']):
-            marker_gene = pd.read_csv(config['marker_gene'], sep=None, engine='python', header=0)
-        elif config.get('marker_gene', None) is None or config['marker_gene']:
+        with open(Path(config['outdir']) / 'config.yaml', 'w') as f:
+            yaml.dump(config, f, default_flow_style=False)
+
+        return result
+    def __call__(self, non_model_h5ad:str, cluster_key:str, outdir:str,
+                 non_model_fasta:str, model_species:list[str],
+                 marker_weight_method:Literal['prod', 'sum']=None, top_num:int=None,
+                 homolo_weight_key:str=None, multihomolo:bool=None,
+                 organ:str=None, threshold:float=None,
+                 mode:Literal['node','path']=None, decay_factor:float=None,
+                 save:bool=True, **kv_blastp_args) -> tuple[dict, dict]:
+        '''
+        Run the full annotation pipeline.
+
+        Parameters:
+            non_model_h5ad: Path to the non-model species h5ad file.
+            cluster_key: Column name in adata.obs storing cluster labels.
+            outdir: Output directory for intermediate and final results.
+            non_model_fasta: Path to the non-model species FASTA file.
+            model_species: List of model species names for homology mapping.
+            marker_weight_method: Weighting method, 'prod' or 'sum'.
+            organ: Organ name for knowledge graph filtering.
+            threshold: Z-score threshold for filtering cell types.
+            mode: Annotation mode, 'node' or 'path'.
+            decay_factor: Decay factor for graph weight propagation.
+            multihomolo: Whether to allow multiple homologs per gene.
+            homolo_weight_key: BLAST result column used as homology weight.
+            save: Whether to save intermediate results to outdir.
+            **kv_blastp_args: Extra arguments passed to blastp.
+
+        Returns:
+            cluster2celltype: Mapping from cluster to predicted cell type.
+            cluster2max_initweight_celltype: Mapping from cluster to max-initial-weight cell type.
+        '''
+        outdir = Path(outdir)
+        os.makedirs(outdir, exist_ok=True)
+
+        marker_gene_path = outdir / 'marker_gene.zip'
+        marker_gene_loaded = False
+        if marker_gene_path.exists():
+            try:
+                marker_gene = pd.read_csv(marker_gene_path, sep=None, engine='python', header=0)
+                marker_gene_loaded = True
+                logger.info('marker_gene loaded from %s', marker_gene_path)
+            except Exception as e:
+                logger.error('marker_gene.zip is corrupted!')
+        if not marker_gene_loaded:
             logger.info('generating marker_gene ...')
-            adata = read_h5ad(config['non_model_h5ad'])
+            adata = read_h5ad(non_model_h5ad)
             logger.info('adata: %s', adata)
-            if Resource_occupancy_record:
-                recorder('load h5ad')
-
-            marker_gene = self.get_markers(adata, config.get('cluster_key', None))
+            marker_gene = self.get_markers(adata, cluster_key)
             if save:
-                marker_gene_path = self.outdir / 'marker_gene.zip'
                 marker_gene.to_csv(marker_gene_path, index=False)
-                config['marker_gene'] = str(marker_gene_path)
                 logger.info('marker_gene saved to %s', marker_gene_path)
             logger.info('marker_gene.shape: %s', marker_gene.shape)
-            if Resource_occupancy_record:
-                recorder('generate marker_gene')
-        
-        if isinstance(config.get('marker_weight', None), str) and os.path.exists(config['marker_weight']):
-            marker_weight = pd.read_csv(config['marker_weight'], sep=None, engine='python', header=0)
-        elif config.get('marker_weight', None) is None or config['marker_weight']:
+
+        marker_weight_path = outdir / 'marker_weight.zip'
+        marker_weight_loaded = False
+        if marker_weight_path.exists():
+            try:
+                marker_weight = pd.read_csv(marker_weight_path, sep=None, engine='python', header=0)
+                marker_weight_loaded = True
+                logger.info('marker_weight loaded from %s', marker_weight_path)
+            except Exception as e:
+                logger.error('marker_weight.zip is corrupted!')
+        if not marker_weight_loaded:
             logger.info('generating marker_weight ...')
-            marker_weight = self.get_gene_weight(marker_gene, config.get('marker_weight_method', 'prod'))
+            marker_weight = self.get_gene_weight(marker_gene, marker_weight_method)
             if save:
-                marker_weight_path = self.outdir / 'marker_weight.zip'
                 marker_weight.to_csv(marker_weight_path, index=False)
-                config['marker_weight'] = str(marker_weight_path)
                 logger.info('marker_weight saved to %s', marker_weight_path)
             logger.info('marker_weight.shape: %s', marker_weight.shape)
-            if Resource_occupancy_record:
-                recorder('generate marker_weight')
 
-        if isinstance(config.get('gene_homolo_weight', None), str) and os.path.exists(config['gene_homolo_weight']):
-            gene_homolo_weight = pd.read_csv(config['gene_homolo_weight'], sep=None, engine='python', header=0)
-        elif config.get('gene_homolo_weight', None) is None or config['gene_homolo_weight']:
+        gene_homolo_weight_path = outdir / 'gene_homolo_weight.zip'
+        gene_homolo_weight_loaded = False
+        if gene_homolo_weight_path.exists():
+            try:
+                gene_homolo_weight = pd.read_csv(gene_homolo_weight_path, sep=None, engine='python', header=0)
+                gene_homolo_weight_loaded = True
+                logger.info('gene_homolo_weight loaded from %s', gene_homolo_weight_path)
+            except Exception as e:
+                logger.error('gene_homolo_weight.zip is corrupted!')
+        if not gene_homolo_weight_loaded:
             logger.info('generating gene_homolo_weight ...')
-            if not config.get('is_protein_fasta', True):
-                config['non_model_fasta'] = translate2protein(config['non_model_fasta'])
-            as_homolo_weight_key = config.get('as_homolo_weight_key', 'pident')
-            gene_homolo_weight = self.mapping(marker_weight, config['non_model_fasta'], config['model_species'], self.outdir, as_homolo_weight_key, config.get('gene_name_prefix', None), config.get('kv_blastp_args', None))
+            gene_homolo_weight = self.mapping(marker_weight, non_model_fasta, model_species, outdir,
+                                              homolo_weight_key, **kv_blastp_args)
             if save:
-                gene_homolo_weight_path = self.outdir / 'gene_homolo_weight.zip'
                 gene_homolo_weight.to_csv(gene_homolo_weight_path, index=False)
-                config['gene_homolo_weight'] = str(gene_homolo_weight_path)
                 logger.info('gene_homolo_weight saved to %s', gene_homolo_weight_path)
             logger.info('gene_homolo_weight.shape: %s', gene_homolo_weight.shape)
-            if Resource_occupancy_record:
-                recorder('generate gene_homolo_weight')
 
-        regenerate = True
-        if isinstance(config.get('topk_markers', None), str) and os.path.exists(config['topk_markers']):
-            topk_markers = pd.read_csv(config['topk_markers'], sep=None, engine='python', header=0)
-            gene_count = topk_markers[['group', 'gene']].drop_duplicates()
-            regenerate = gene_count.shape[0] != len(gene_count['group'].unique()) * config['top_num']
-        if config.get('topk_markers', None) is None or config['topk_markers'] or regenerate:
+        topk_markers_path = outdir / 'topk_markers.zip'
+        topk_markers_loaded = False
+        if topk_markers_path.exists():
+            try:
+                topk_markers = pd.read_csv(topk_markers_path, sep=None, engine='python', header=0)
+                gene_count = topk_markers[['group', 'gene']].drop_duplicates()
+                if gene_count.shape[0] == len(gene_count['group'].unique()) * top_num:
+                    topk_markers_loaded = True
+                    logger.info('topk_markers loaded from %s', topk_markers_path)
+            except Exception as e:
+                logger.error('topk_markers.zip is corrupted!')
+        if not topk_markers_loaded:
             logger.info('generating topk_markers ...')
-            topk_markers = self.get_topk_gene(gene_homolo_weight, config['top_num'], config.get('multihomolo', True))
+            topk_markers = self.get_topk_gene(gene_homolo_weight, top_num, multihomolo)
             if save:
-                topk_markers_path = self.outdir / 'topk_markers.zip'
                 topk_markers.to_csv(topk_markers_path, index=False)
-                config['topk_markers'] = str(topk_markers_path)
                 logger.info('topk_markers saved to %s', topk_markers_path)
             logger.info('topk_markers.shape: %s', topk_markers.shape)
-            if Resource_occupancy_record:
-                recorder('generate topk_markers')
 
-        annotation_info_path = self.outdir / 'annotation'
+        annotation_info_path = outdir / 'annotation'
         cluster2celltype, cluster2max_initweight_celltype, celltype_weight, cluster_celltype_ann = self.cell_annotation(
-            topk_markers, annotation_info_path, config.get('organ', None), 
-            config.get('threshold', None), config.get('candidate_annotation', None), 
-            mode=config.get('mode', 'path'), decay_factor=config.get('decay_factor', 0.7))
-        if Resource_occupancy_record:
-            recorder('cell_annotation')
-        # Cell type information
+            topk_markers, annotation_info_path, organ, threshold,
+            mode=mode, decay_factor=decay_factor)
+
         if save:
-            celltype_weight_path = self.outdir / 'celltype_weight.zip'
+            celltype_weight_path = outdir / 'celltype_weight.zip'
             celltype_weight.to_csv(celltype_weight_path, index=False)
             logger.info('celltype_weight saved to %s', celltype_weight_path)
         logger.info('celltype_weight.shape: %s', celltype_weight.shape)
         if cluster_celltype_ann.shape[0] > 0:
-            cluster_celltype_ann_path = self.outdir / 'cluster_celltype_ann.zip'
+            cluster_celltype_ann_path = outdir / 'cluster_celltype_ann.zip'
             cluster_celltype_ann.to_csv(cluster_celltype_ann_path)
-        if Resource_occupancy_record:
-            recorder('save celltype_weight')
-
-        with open(self.outdir / 'config.yaml', 'w') as f:
-            yaml.dump(config, f, default_flow_style=False)
 
         return cluster2celltype, cluster2max_initweight_celltype
     
@@ -227,8 +250,9 @@ class Xener:
         markers = sc.get.rank_genes_groups_df(adata, group=None, key='rank_genes_groups')
         return markers.drop(columns=['scores'])
     
-    def get_gene_weight(self, markers:pd.DataFrame, method:Literal['prod','sum']='prod'):
-        logger.info(f'>>>generating gene_weight method[{method}].')
+    def get_gene_weight(self, markers:pd.DataFrame, marker_weight_method:Literal['prod','sum']=None):
+        marker_weight_method = self._default_config['marker_weight_method'] if marker_weight_method is None else marker_weight_method
+        logger.info(f'>>>generating gene_weight method[{marker_weight_method}].')
         # Determine data source: scanpy/Seurat
         col_maps = {
             'scanpy':{'pct_nz_group':'pct1',    'pct_nz_reference':'pct2',  'pvals_adj':'pv', 'logfoldchanges':'logfc'},
@@ -269,9 +293,9 @@ class Xener:
         markers['-log10_pvals_adj'] = markers['pv'].map(lambda x: -np.log10(x))
         if any(np.isinf(markers['-log10_pvals_adj'])):
             logger.warning('-log10_pvals_adj has inf values, please check the data')
-        if method == 'prod':
+        if marker_weight_method == 'prod':
             markers['weight'] = markers['logfc'] * markers['pts_delta'] * markers['-log10_pvals_adj']
-        elif method == 'sum':
+        elif marker_weight_method == 'sum':
             markers['weight'] = markers['logfc'] + markers['pts_delta'] + markers['-log10_pvals_adj']
         markers.loc[markers['weight'] < 0, 'weight'] = 0
 
@@ -284,15 +308,17 @@ class Xener:
             logger.warning('weight has inf values, please check the data')
         return markers
 
-    def get_topk_gene(self, markers:pd.DataFrame, k:int=10, multihomolo:bool=True) -> pd.DataFrame:
-        logger.info(f'>>>getting topk_gene k[{k}], multihomolo[{multihomolo}].')
+    def get_topk_gene(self, markers:pd.DataFrame, top_num:int=None, multihomolo:bool=None) -> pd.DataFrame:
+        top_num = self._default_config['top_num'] if top_num is None else top_num
+        multihomolo = self._default_config['multihomolo'] if multihomolo is None else multihomolo
+        logger.info(f'>>>getting topk_gene k[{top_num}], multihomolo[{multihomolo}].')
         # Start getting top genes
         ## Step 1: Group by group and gene, get unique weight for each gene
         grouped = markers.groupby(['group', 'gene'], as_index=False)['weight'].first()
         ## Step 2: Sort by weight in descending order within each group
         grouped['rank'] = grouped.groupby('group')['weight'].rank(method='first', ascending=False)
         ## Step 3: Take top_num genes for each group
-        top_gene = grouped[grouped['rank'] <= k].drop(columns=['rank'])
+        top_gene = grouped[grouped['rank'] <= top_num].drop(columns=['rank'])
         ## Step 4: Keep gene to homolo mapping
         result = pd.merge(top_gene, markers[['gene', 'homolo', 'homolo_weight']].drop_duplicates(), on='gene', how='left')
         result.sort_values(by=['group', 'weight'], inplace=True, ascending=[True, False])
@@ -310,7 +336,7 @@ class Xener:
         return result
 
     def mapping(self, markers:pd.DataFrame, non_model_fasta:str, 
-            model_species:list[str], outdir:str, as_homolo_weight_key='pident', gene_name_prefix:str=None,
+            model_species:list[str], outdir:str, homolo_weight_key=None,
             num_threads:int=None, pident=60, evalue=0.05, bitscore=200, **kv_blastp_args) -> pd.DataFrame:
         '''
         Run BLAST to find homologous genes and integrate them into markers.
@@ -321,7 +347,8 @@ class Xener:
         Returns:
             pd.DataFrame: Relationship between marker genes and their homologous genes, with weight column named homolo_weight
         '''
-        logger.info(f'>>>mapping markers model_species[{model_species}], as_homolo_weight_key[{as_homolo_weight_key}].')
+        homolo_weight_key = self._default_config['homolo_weight_key'] if homolo_weight_key is None else homolo_weight_key
+        logger.info(f'>>>mapping markers model_species[{model_species}], homolo_weight_key[{homolo_weight_key}].')
         # Compatibility with old version
         if 'weight' not in markers.columns:
             if 'energy' in markers.columns:
@@ -332,7 +359,7 @@ class Xener:
         # Start finding homologs
         marker_list = markers['gene'].unique().tolist()
         logger.info('mapping %s genes from %s', len(marker_list), model_species)
-        seq_file = extract_fasta_by_name(outdir, marker_list, non_model_fasta, gene_name_prefix)
+        seq_file = extract_fasta_by_name(outdir, marker_list, non_model_fasta)
         blastp_result = []
         for species in model_species:
             non_model_name = os.path.basename(non_model_fasta).split('.')[0]
@@ -363,7 +390,7 @@ class Xener:
             condition &= blast_result['bitscore'] > bitscore # Alignment score
         blast_result = blast_result[condition]
 
-        blast_result = blast_result[['qseqid', 'sseqid', as_homolo_weight_key]]
+        blast_result = blast_result[['qseqid', 'sseqid', homolo_weight_key]]
         blast_result.columns = ['gene', 'homolo', 'homolo_weight']
 
         # Merge homologs
@@ -377,22 +404,24 @@ class Xener:
         return blast_result_with_weight
 
     def cell_annotation(self, blast_result, 
-            outdir:Path, organ=None, threshold:int=None, candidate_annotation:list[str]=None,
-            mode:Literal['node','path']='node', decay_factor:float=0.7) -> tuple[dict[str, str], pd.DataFrame, pd.DataFrame]:
+            outdir:Path, organ=None, threshold:int=None,
+            mode:Literal['node','path']=None, decay_factor:float=0.7) -> tuple[dict[str, str], pd.DataFrame, pd.DataFrame]:
         '''
         Annotate each cell cluster and save celltype weight information for each cluster.
         Parameters:
             blast_result (pandas.DataFrame): BLAST result. Key `group` contains cluster information. Key `gene` contains gene names. Key `homolo` contains BLAST homologous genes. Key `weight` contains gene weights. Key `pct` contains confidence between homologous gene and gene.
             organ (str, optional): Organ name. Defaults to None
             threshold (int, optional): Threshold for filtering cell types. Defaults to None
-            candidate_annotation (list[str], optional): Candidate cell types. Defaults to None
         Returns:
             cluster2celltype (dict[str, str]): Mapping from cluster to celltype
             cluster2max_initweight_celltype (dict[str, str]): Mapping from cluster to celltype with maximum initial weight
             celltype_weight (pandas.DataFrame): Cell type information
             cluster_celltype_ann (pandas.DataFrame): Mapping from predicted type to candidate type, indexed by cluster
         '''
-        logger.info(f'>>>cell annotation organ[{organ}], threshold[{threshold}], candidate_annotation[{candidate_annotation}], mode[{mode}], decay_factor[{decay_factor}].')
+        threshold = self._default_config['threshold'] if threshold is None else threshold
+        mode = self._default_config['mode'] if mode is None else mode
+        decay_factor = self._default_config['decay_factor'] if decay_factor is None else decay_factor
+        logger.info(f'>>>cell annotation organ[{organ}], threshold[{threshold}], mode[{mode}], decay_factor[{decay_factor}].')
         outdir = Path(outdir)
         os.makedirs(outdir, exist_ok=True)
         # Validate organ
@@ -413,7 +442,7 @@ class Xener:
             cluster2celltype[group], cluster2max_initweight_celltype[group], celltypes,\
                   weights, init_weights = self.cell_annotation_cluster_singlecluster(
                 blast_result[blast_result['group'] == group],  
-                f'cluster_{group}', outdir, organ, candidate_annotation, 
+                f'cluster_{group}', outdir, organ, 
                 threshold=threshold, mode=mode, decay_factor=decay_factor)
 
             cluster_list += [group] * len(celltypes)
@@ -429,7 +458,7 @@ class Xener:
         return cluster2celltype, cluster2max_initweight_celltype, celltype_weight, cluster_celltype_ann
 
     def cell_annotation_cluster_singlecluster(self, blast_result:pd.DataFrame, 
-            output_prefix, outdir:Path, organ=None, candidate_annotation:list[str]=None, 
+            output_prefix, outdir:Path, organ=None, 
             threshold:int=None, mode:Literal['node','path']='node', decay_factor:float=0.9
         ) -> tuple[str, list[str], list[float]]:
         '''
@@ -437,7 +466,6 @@ class Xener:
         Parameters:
             blast_result (pd.DataFrame): BLAST result for a single cluster. Key `group` contains cluster information. Key `gene` contains gene names. Key `homolo` contains BLAST homologous genes. Key `weight` contains gene weights. Key `pct` contains confidence between homologous gene and gene.
             organ (str, optional): Organ name. Defaults to None
-            candidate_annotation (list[str], optional): Candidate cell types to constrain knowledge graph query results. Defaults to None
             threshold (int, optional): Threshold for filtering candidate types using normal distribution of cell type weights
         Returns:
             celltype (str): Cell type; when mode is set to 'path', the return value may contain multiple cell types separated by '>' and difficult-to-distinguish types connected by '|'
@@ -454,7 +482,7 @@ class Xener:
         # Query knowledge graph based on homologs
         homolo_nodes = blast_result['homolo'].unique().tolist()
         _, celltype_nodes, homolo2celltype_matrix = self.KG.get_gene2celltype_kg(
-            homolo_nodes, organ, candidate_type=candidate_annotation)# Do not limit when querying knowledge graph
+            homolo_nodes, organ)# Do not limit when querying knowledge graph
 
         # Decay the relationship between homologous genes and cell types; the more cell types connected to a homologous gene, the less distinguishable they are, and the more decay is applied
         sum_result = homolo2celltype_matrix.sum(axis=1)

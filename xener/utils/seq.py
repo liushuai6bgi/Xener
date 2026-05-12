@@ -25,7 +25,7 @@ def deduplicate_fasta_by_length(outfile:str, fasta_file:str) -> str:
             SeqIO.write(SeqIO.SeqRecord(sequence, id=gene_id, description=""), output_handle, "fasta")
     return outfile
 
-def extract_fasta_by_name(outdir, name_list:list[str], fasta_file, gene_name_prefix:str=None) -> str:
+def extract_fasta_by_name(outdir, name_list:list[str], fasta_file) -> str:
     """
     Extract sequences with specified names from a FASTA file.
 
@@ -33,7 +33,6 @@ def extract_fasta_by_name(outdir, name_list:list[str], fasta_file, gene_name_pre
         outdir: Output directory.
         name_list: List of sequence names to extract.
         fasta_file: FASTA file path.
-        gene_name_prefix: Gene name prefix to strip.
 
     Returns:
         Output file path.
@@ -43,15 +42,11 @@ def extract_fasta_by_name(outdir, name_list:list[str], fasta_file, gene_name_pre
     name_set = set()
     for original_name in name_list:
         name = original_name
-        if gene_name_prefix is not None and original_name.startswith(gene_name_prefix):
-            name = original_name[len(gene_name_prefix):]
         name = name.replace('-', '_')
         name2original_name[name] = original_name
         name_set.add(name)
     for record in SeqIO.parse(fasta_file, "fasta"):
         gene_id = record.id
-        if gene_name_prefix is not None and gene_id.startswith(gene_name_prefix):
-            gene_id = gene_id[len(gene_name_prefix):]
         gene_id = gene_id.replace('-', '_')
         if gene_id in name_set:
             gene_id = name2original_name[gene_id]

@@ -13,17 +13,16 @@ pip install xener
 
 ## Quick Start
 
+### With a YAML config file
+
 ```python
 from xener import Xener
 
-# Initialize
 annor = Xener()
-
-# Run full pipeline
 cluster2celltype, _ = annor.run_from_yaml('config.yaml')
 ```
 
-`config.yaml` example.
+`config.yaml` example:
 
 ```yaml
 cluster_key: leiden
@@ -35,7 +34,27 @@ organ: leaf
 outdir: output/ERP132245
 ```
 
+### Programmatic API
+
+```python
+from xener import Xener
+
+annor = Xener()
+cluster2celltype, _ = annor(
+    non_model_h5ad='ERP132245.h5ad',
+    cluster_key='leiden',
+    outdir='output/ERP132245',
+    non_model_fasta='Arabidopsis_thaliana.fasta',
+    model_species=['Brassica_rapa'],
+    organ='leaf',
+)
+```
+
+Defaults for `marker_weight_method`, `mode`, `decay_factor`, `multihomolo`, `top_num`, etc. come from the default config and can be overridden as keyword arguments.
+
 ## Step-by-step
+
+The `__call__` API above is the simplest way to run the full pipeline. If you need fine-grained control, you can call each step individually:
 
 ```python
 from xener import Xener
@@ -58,8 +77,8 @@ gene_homolo_weight = annor.mapping(marker_weight, non_model_fasta, model_species
 topk_markers = annor.get_topk_gene(gene_homolo_weight, k=30)
 # Only the top 30 genes will be retained for the subsequent steps.
 
-cluster2celltype, _, celltype_weight, _, _ = annor.cell_annotation(
-            topk_markers, annotation_info_path, organ)
+cluster2celltype, _, celltype_weight, _ = annor.cell_annotation(
+    topk_markers, outdir / 'annotation', organ)
 ```
 
 ## Sub-cluster refinement
