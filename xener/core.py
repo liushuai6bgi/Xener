@@ -171,7 +171,7 @@ class Xener:
                 recorder('generate topk_markers')
 
         annotation_info_path = self.outdir / 'annotation'
-        cluster2celltype, cluster2max_initweight_celltype, celltype_weight, cluster_celltype_ann, homolo2celltype = self.cell_annotation(
+        cluster2celltype, cluster2max_initweight_celltype, celltype_weight, cluster_celltype_ann = self.cell_annotation(
             topk_markers, annotation_info_path, config.get('organ', None), 
             config.get('threshold', None), config.get('candidate_annotation', None), 
             mode=config.get('mode', 'path'), decay_factor=config.get('decay_factor', 0.7))
@@ -181,7 +181,6 @@ class Xener:
         if save:
             celltype_weight_path = self.outdir / 'celltype_weight.zip'
             celltype_weight.to_csv(celltype_weight_path, index=False)
-            homolo2celltype.to_csv(self.outdir / 'homolo2celltype.zip', index=False)
             logger.info('celltype_weight saved to %s', celltype_weight_path)
         logger.info('celltype_weight.shape: %s', celltype_weight.shape)
         if cluster_celltype_ann.shape[0] > 0:
@@ -392,7 +391,6 @@ class Xener:
             cluster2max_initweight_celltype (dict[str, str]): Mapping from cluster to celltype with maximum initial weight
             celltype_weight (pandas.DataFrame): Cell type information
             cluster_celltype_ann (pandas.DataFrame): Mapping from predicted type to candidate type, indexed by cluster
-            homolo2celltype (pandas.DataFrame): Relationship between homologous genes and cell types, columns: 'homolo', 'celltype', 'homolo2celltype'
         '''
         logger.info(f'>>>cell annotation organ[{organ}], threshold[{threshold}], candidate_annotation[{candidate_annotation}], mode[{mode}], decay_factor[{decay_factor}].')
         outdir = Path(outdir)
@@ -405,16 +403,15 @@ class Xener:
             organ = checked_organ
             
         # Lists to save all celltype weights for each cluster, these three lists should have equal length
-        cluster_list, celltype_list, weight_list, init_weight_list, genecount_graph_list, genecount_KG_list, homolo2celltype_list =\
-        [], [], [], [], [], [], []
+        cluster_list, celltype_list, weight_list, init_weight_list = [], [], [], []
 
         cluster_celltype_ann = pd.DataFrame(index=blast_result['group'].unique(),columns=['celltype', 'ann_celltype'])
         cluster2celltype = dict()
         cluster2max_initweight_celltype = dict()
         for group in blast_result['group'].unique():
             logger.info('processing cluster %s', group)
-            cluster2celltype[group], cluster2max_initweight_celltype[group], celltypes, weights, init_weights,\
-                  genecount_graph, genecount_KG, homolo2celltype, gene2celltype_matrix = self.cell_annotation_cluster_singlecluster(
+            cluster2celltype[group], cluster2max_initweight_celltype[group], celltypes,\
+                  weights, init_weights = self.cell_annotation_cluster_singlecluster(
                 blast_result[blast_result['group'] == group],  
                 f'cluster_{group}', outdir, organ, candidate_annotation, 
                 threshold=threshold, mode=mode, decay_factor=decay_factor)
@@ -423,24 +420,17 @@ class Xener:
             celltype_list.extend(celltypes)
             weight_list.extend(weights)
             init_weight_list.extend(init_weights)
-            genecount_graph_list.extend(genecount_graph)
-            genecount_KG_list.extend(genecount_KG)
-            homolo2celltype_list.extend(homolo2celltype)
         celltype_weight = pd.DataFrame(
             {'cluster': cluster_list, 
              'celltype': celltype_list, 
-             'genecount_graph': genecount_graph_list,
-             'genecount_KG': genecount_KG_list,
              'weight': weight_list,
              'init_weight':init_weight_list}
              )
-        homolo2celltype = pd.DataFrame(homolo2celltype_list, columns=['homolo', 'celltype', 'homolo2celltype']).drop_duplicates()
-        return cluster2celltype, cluster2max_initweight_celltype, celltype_weight, cluster_celltype_ann, homolo2celltype
+        return cluster2celltype, cluster2max_initweight_celltype, celltype_weight, cluster_celltype_ann
 
     def cell_annotation_cluster_singlecluster(self, blast_result:pd.DataFrame, 
             output_prefix, outdir:Path, organ=None, candidate_annotation:list[str]=None, 
-            threshold:int=None,return_genecount_graph=True, return_genecount_KG=True,
-            mode:Literal['node','path']='node', decay_factor:float=0.9
+            threshold:int=None, mode:Literal['node','path']='node', decay_factor:float=0.9
         ) -> tuple[str, list[str], list[float]]:
         '''
         Annotate a single cluster with cell types.
@@ -455,10 +445,6 @@ class Xener:
             celltype_list (list[str]): All possible cell types
             weight_list (list[float]): Cell type weights, sorted in descending order; these are aggregated results
             initial_weight_list (list[float]): Cell type weights before aggregation
-            genecount_graph (list[int]): Number of genes for each cell type in the annotation graph
-            genecount_KG (list[int]): Number of genes for each cell type in the knowledge graph
-            homolo2celltype_list (list[tuple[str,str,float]]): Records relationship between homologous genes and cell types, in order: homolo_node, celltype_node, weight
-            gene2celltype_matrix (sp.csr_matrix): Sparse matrix representing gene-to-celltype relationships
         '''
         outdir = Path(outdir)
         os.makedirs(outdir, exist_ok=True)
@@ -482,16 +468,6 @@ class Xener:
         # Using 1.1 to avoid decay_coefficient being set to 0 when there is only one candidate type
         decay_coefficient = 1.1 - sp.csr_matrix(sum_result) / divisor
         homolo2celltype_matrix = homolo2celltype_matrix.multiply(decay_coefficient).tocsr()
-
-        # Record the relationship between homologous genes and cell types
-        homolo2celltype_list = []
-        coo_matrix = homolo2celltype_matrix.tocoo()
-        for row, col, weight in zip(coo_matrix.row, coo_matrix.col, coo_matrix.data):
-            if weight == 0:  # Ignore zero-weight edges
-                continue
-            homolo_node = homolo_nodes[row]
-            celltype_node = celltype_nodes[col]
-            homolo2celltype_list.append([homolo_node, celltype_node, weight])
 
         sub_g_homolo2celltype = build_graph_from_adjust_matrix(
             homolo2celltype_matrix,
@@ -678,20 +654,6 @@ class Xener:
         weight_list = [node[1]['weight'] for node in sorted_nodes]
         initial_weight_list = [weight[celltypes.index(node[0])] for node in sorted_nodes]
 
-        genecount_KG = []
-        if return_genecount_KG:
-            for i in celltype_list:
-                genecount_KG.append(self.KG.get_genecount_kg(i))
-
-        genecount_graph = []
-        if return_genecount_graph:
-            graph_count = homolo2celltype_matrix.getnnz(axis=0)
-            for i in celltype_list:
-                if i not in celltype_nodes:
-                    genecount_graph.append(0)
-                else:
-                    genecount_graph.append(graph_count[celltype_nodes.index(i)])
-        
         graph_gene2celltypes = nx.compose(sub_g_gene2celltype, sub_g_celltype2celltype)
         # graph_gene2celltypes = clean_graph_attributes(graph_gene2celltypes)
         # Convert recorder to native type
@@ -704,7 +666,7 @@ class Xener:
         if not signal4recorder: # No recorder
             logger.warning('No recorder in graph_gene2celltype')
         nx.write_gexf(graph_gene2celltypes, outdir / f'{output_prefix}_gene2celltype.xml')
-        return celltype, max_initweight_celltype, celltype_list, weight_list, initial_weight_list, genecount_graph, genecount_KG, homolo2celltype_list, gene2celltype_matrix
+        return celltype, max_initweight_celltype, celltype_list, weight_list, initial_weight_list
 
     def refine(self, adata:sc.AnnData, group_gene_homolo_weight:pd.DataFrame, 
                celltypes_weight:pd.DataFrame, key_added:str, 
@@ -779,6 +741,9 @@ class Xener:
             Determines the order of cell type partitioning
         '''
         logger.info('>>>refine_single_cluster: %s, %s', cluster_id, cluster_key)
+        if hasattr(adata, 'raw') and adata.raw is not None:
+            adata = adata.raw.to_adata()
+            logger.info('adata.X is raw.X')
         if 'pca' not in adata.uns.keys():
             logger.info('run sc.pp.pca(adata)')
             sc.pp.pca(adata)
@@ -795,6 +760,10 @@ class Xener:
             # Get mapping from homologous gene to marker
             homolo2gene = {}
             group_gene_homolo_weight['group'] = group_gene_homolo_weight['group'].astype(str)
+            logger.info('group_gene_homolo_weight[group] in str: %s', group_gene_homolo_weight['group'].unique())
+            if str(cluster_id) not in group_gene_homolo_weight['group'].unique():
+                logger.warning(f'No homolo2gene mapping, check your cluster_id[{cluster_id}].')
+                return
             group_gene_homolo_weight = group_gene_homolo_weight[group_gene_homolo_weight['group'] == str(cluster_id)]
             group_gene_homolo_weight.apply(lambda x: homolo2gene.update({x['homolo']: x['gene']}), axis=1)
             # Look up marker genes in knowledge graph for each cell type
@@ -818,7 +787,6 @@ class Xener:
             all_markers = set()
             for markers in celltype2markers.values():
                 all_markers.update(markers)
-
             adata.obs[cluster_key] = adata.obs[cluster_key].astype(str)
             adata_sub = adata[adata.obs[cluster_key] == str(cluster_id), list(all_markers)].copy()
             marker_available = all_markers
