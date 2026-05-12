@@ -5,6 +5,8 @@ _DATA_URL = {
     "default_run_conf.yaml":"https://xenor.dcs.cloud/api/public/download?file=default_run_conf.yaml"}
 _XENER_DATA_DIR = Path.home() / ".xener" / "data"
 
+LAYER_KEY4RAW_COUNTS = "layer_key4raw_counts"
+
 def _ensure_data(DATA_KEY:str=None, force_update:bool=False):
     assert DATA_KEY is None or DATA_KEY in _DATA_URL.keys(), "Invalid data key"
     

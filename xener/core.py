@@ -20,7 +20,7 @@ from .utils.blast import makeblastdb, get_blastdb, blastp
 from .utils.seq import extract_fasta_by_name, translate2protein
 from .utils.kg import KGClient
 from .utils.h5ad import read_h5ad, write_h5ad, quality_control
-from .config import _XENER_DATA_DIR, _ensure_data
+from .config import _XENER_DATA_DIR, _ensure_data, LAYER_KEY4RAW_COUNTS
 
 class Xener:
     @staticmethod
@@ -206,6 +206,7 @@ class Xener:
         Returns:
             pd.DataFrame: Result of scanpy.get.rank_genes_groups_df
         '''
+        logger.info(f'>>>getting markers cluster_key[{cluster_key}].')
         if preprocess:
             adata = quality_control(adata)
             sc.pp.highly_variable_genes(
@@ -220,12 +221,15 @@ class Xener:
             sce.pp.bbknn(adata, batch_key=batch_key)
         if adata.obs[cluster_key].dtype != 'str':
             adata.obs[cluster_key] = adata.obs[cluster_key].astype('str')
-        sc.tl.rank_genes_groups(adata, groupby=cluster_key, key_added = "rank_genes_groups", pts=True)
+        layer = LAYER_KEY4RAW_COUNTS if LAYER_KEY4RAW_COUNTS in adata.layers else None
+        logger.info('Using layer %s for marker analysis', layer)
+        sc.tl.rank_genes_groups(adata, groupby=cluster_key, key_added = "rank_genes_groups", layer=layer, use_raw=True, pts=True)
         # Get gene ranking table = number of clusters * number of genes
         markers = sc.get.rank_genes_groups_df(adata, group=None, key='rank_genes_groups')
         return markers.drop(columns=['scores'])
     
     def get_gene_weight(self, markers:pd.DataFrame, method:Literal['prod','sum']='prod'):
+        logger.info(f'>>>generating gene_weight method[{method}].')
         # Determine data source: scanpy/Seurat
         col_maps = {
             'scanpy':{'pct_nz_group':'pct1',    'pct_nz_reference':'pct2',  'pvals_adj':'pv', 'logfoldchanges':'logfc'},
@@ -282,12 +286,7 @@ class Xener:
         return markers
 
     def get_topk_gene(self, markers:pd.DataFrame, k:int=10, multihomolo:bool=True) -> pd.DataFrame:
-        # Compatibility with old version
-        if 'weight' not in markers.columns:
-            if 'energy' in markers.columns:
-                markers['weight'] = markers['energy']
-            else:
-                raise ValueError('No weight column found in markers')
+        logger.info(f'>>>getting topk_gene k[{k}], multihomolo[{multihomolo}].')
         # Start getting top genes
         ## Step 1: Group by group and gene, get unique weight for each gene
         grouped = markers.groupby(['group', 'gene'], as_index=False)['weight'].first()
@@ -323,6 +322,7 @@ class Xener:
         Returns:
             pd.DataFrame: Relationship between marker genes and their homologous genes, with weight column named homolo_weight
         '''
+        logger.info(f'>>>mapping markers model_species[{model_species}], as_homolo_weight_key[{as_homolo_weight_key}].')
         # Compatibility with old version
         if 'weight' not in markers.columns:
             if 'energy' in markers.columns:
@@ -394,6 +394,7 @@ class Xener:
             cluster_celltype_ann (pandas.DataFrame): Mapping from predicted type to candidate type, indexed by cluster
             homolo2celltype (pandas.DataFrame): Relationship between homologous genes and cell types, columns: 'homolo', 'celltype', 'homolo2celltype'
         '''
+        logger.info(f'>>>cell annotation organ[{organ}], threshold[{threshold}], candidate_annotation[{candidate_annotation}], mode[{mode}], decay_factor[{decay_factor}].')
         outdir = Path(outdir)
         os.makedirs(outdir, exist_ok=True)
         # Validate organ
@@ -413,7 +414,7 @@ class Xener:
         for group in blast_result['group'].unique():
             logger.info('processing cluster %s', group)
             cluster2celltype[group], cluster2max_initweight_celltype[group], celltypes, weights, init_weights,\
-                  genecount_graph, genecount_KG, homolo2celltype, gene2celltype_matrix = self.cell_annotation_cluster_singletype(
+                  genecount_graph, genecount_KG, homolo2celltype, gene2celltype_matrix = self.cell_annotation_cluster_singlecluster(
                 blast_result[blast_result['group'] == group],  
                 f'cluster_{group}', outdir, organ, candidate_annotation, 
                 threshold=threshold, mode=mode, decay_factor=decay_factor)
@@ -436,7 +437,7 @@ class Xener:
         homolo2celltype = pd.DataFrame(homolo2celltype_list, columns=['homolo', 'celltype', 'homolo2celltype']).drop_duplicates()
         return cluster2celltype, cluster2max_initweight_celltype, celltype_weight, cluster_celltype_ann, homolo2celltype
 
-    def cell_annotation_cluster_singletype(self, blast_result:pd.DataFrame, 
+    def cell_annotation_cluster_singlecluster(self, blast_result:pd.DataFrame, 
             output_prefix, outdir:Path, organ=None, candidate_annotation:list[str]=None, 
             threshold:int=None,return_genecount_graph=True, return_genecount_KG=True,
             mode:Literal['node','path']='node', decay_factor:float=0.9
@@ -777,7 +778,7 @@ class Xener:
             Determines gene composition for each cell type
             Determines the order of cell type partitioning
         '''
-        logger.info('refine_single_cluster: %s, %s', cluster_id, cluster_key)
+        logger.info('>>>refine_single_cluster: %s, %s', cluster_id, cluster_key)
         if 'pca' not in adata.uns.keys():
             logger.info('run sc.pp.pca(adata)')
             sc.pp.pca(adata)
