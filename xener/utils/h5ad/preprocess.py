@@ -4,7 +4,6 @@ import sys
 import scanpy as sc
 
 from ..logger import logger
-from ...config import LAYER_KEY4RAW_COUNTS
 
 def read_h5ad(path:str) -> sc.AnnData:
     """
@@ -20,11 +19,6 @@ def read_h5ad(path:str) -> sc.AnnData:
     # save the raw counts
     if hasattr(adata, 'raw') and adata.raw is not None:
         logger.info(f'adata.raw.X already exists.')
-    elif LAYER_KEY4RAW_COUNTS in adata.layers:
-        logger.info(f'adata.layers[{LAYER_KEY4RAW_COUNTS}] already exists.')
-    else:
-        adata.layers[LAYER_KEY4RAW_COUNTS] = adata.X.copy()
-        logger.info(f'adata.X saved to adata.layers[{LAYER_KEY4RAW_COUNTS}].')        
     return adata
 
 def write_h5ad(adata:sc.AnnData, path:str):
