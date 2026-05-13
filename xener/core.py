@@ -949,8 +949,6 @@ class Xener:
                 adata.obs[f'{goal_type}_EXP'] = mean_exp
                 exps.append(adata_sub[:,goal_gene].X.mean(axis=1))
             exps = np.array(exps)
-            # Remove extra dimensions
-            exps = np.squeeze(exps)
             connectivities = adata_sub.obsp['connectivities']
             connectivities_sum = connectivities.sum(axis=1)
             exps = connectivities / connectivities_sum @ exps.T
