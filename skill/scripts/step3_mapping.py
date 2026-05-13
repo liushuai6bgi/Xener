@@ -11,7 +11,7 @@ from xener import Xener
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True, help="Path to marker_weight.csv")
+    parser.add_argument("--input", required=True, help="Path to marker_weight.zip")
     parser.add_argument("--fasta", required=True, help="Path to non-model species FASTA file")
     parser.add_argument("--species", required=True, nargs="+",
                         help="Model species names (e.g., Brassica_rapa)")
@@ -34,19 +34,19 @@ def main():
     markers = pd.read_csv(args.input)
     annor = Xener()
 
-    homolo_weights = annor.mapping(
+    homolo_weights, debug_map = annor.mapping(
         markers,
         non_model_fasta=args.fasta,
         model_species=args.species,
         outdir=outdir,
-        as_homolo_weight_key=args.weight_key,
+        homolo_weight_key=args.weight_key,
         pident=args.pident,
         evalue=args.evalue,
         bitscore=args.bitscore,
         num_threads=args.num_threads
     )
 
-    output_path = os.path.join(args.outdir, "gene_homolo_weight.csv")
+    output_path = os.path.join(args.outdir, "gene_homolo_weight.zip")
     homolo_weights.to_csv(output_path, index=False)
     print(f"Homology mapping saved to {output_path}")
     print(f"Shape: {homolo_weights.shape}")

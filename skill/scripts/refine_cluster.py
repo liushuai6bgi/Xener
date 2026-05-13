@@ -11,7 +11,7 @@ from xener import Xener
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True, help="Path to .h5ad file")
-    parser.add_argument("--markers", required=True, help="Path to topk_markers.csv")
+    parser.add_argument("--markers", required=True, help="Path to topk_markers.zip")
     parser.add_argument("--cluster-key", default="leiden", help="Cluster column name")
     parser.add_argument("--cluster-id", required=True, help="Cluster ID to refine")
     parser.add_argument("--celltype", required=True, help="Candidate cell types (comma-separated)")
@@ -42,7 +42,7 @@ def main():
 
     annor = Xener()
 
-    result = annor.refine_single_cluster(
+    geneCount, diffgeneCount, annotation = annor.refine_single_cluster(
         adata,
         topk_markers,
         cluster_key=args.cluster_key,
@@ -55,13 +55,15 @@ def main():
         markergene_method=args.markergene_method
     )
 
-    # Save refined adata
-    output_h5ad = os.path.join(args.outdir, f"refined_{args.cluster_id}.h5ad")
-    adata.write_h5ad(output_h5ad)
+    # Save refined annotation
+    output_csv = os.path.join(args.outdir, f"refined_{args.cluster_id}.zip")
+    annotation.to_csv(output_csv)
 
-    print(f"Refinement saved to {output_h5ad}")
+    print(f"Refinement saved to {output_csv}")
     print(f"Annotation column: {args.key_added}")
-    print(f"Cell types found: {adata.obs[args.key_added].unique().tolist()}")
+    print(f"Cell types found: {annotation[args.key_added].unique().tolist()}")
+    print(f"Gene counts per cell type: {geneCount}")
+    print(f"Diff gene counts per cell type: {diffgeneCount}")
 
 
 if __name__ == "__main__":

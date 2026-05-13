@@ -12,7 +12,7 @@ from xener import Xener
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True, help="Path to topk_markers.csv")
+    parser.add_argument("--input", required=True, help="Path to topk_markers.zip")
     parser.add_argument("--outdir", required=True, help="Output directory for annotations")
     parser.add_argument("--organ", default=None, help="Organ name (e.g., leaf, root)")
     parser.add_argument("--threshold", type=int, default=None,
@@ -23,8 +23,6 @@ def main():
                         help="Annotation mode: node (single type) or path (developmental trajectory)")
     parser.add_argument("--decay-factor", type=float, default=0.7,
                         help="Weight decay factor for graph propagation")
-    parser.add_argument("--resolution", default="Cell", choices=["Cell", "Tissue"],
-                        help="Annotation resolution")
     args = parser.parse_args()
 
     outdir = Path(args.outdir)
@@ -33,13 +31,12 @@ def main():
     topk = pd.read_csv(args.input)
     annor = Xener()
 
-    cluster2celltype, cluster2max, celltype_weight, cluster_celltype_ann, homolo2celltype = \
+    cluster2celltype, cluster2max, celltype_weight, debug_ann = \
         annor.cell_annotation(
             topk,
             outdir=outdir,
             organ=args.organ,
             threshold=args.threshold,
-            resolution=args.resolution,
             mode=args.mode,
             decay_factor=args.decay_factor
         )
@@ -48,11 +45,14 @@ def main():
     with open(os.path.join(args.outdir, "cluster2celltype.json"), "w") as f:
         json.dump({str(k): v for k, v in cluster2celltype.items()}, f, indent=2)
 
-    celltype_weight.to_csv(os.path.join(args.outdir, "celltype_weight.csv"), index=False)
-    homolo2celltype.to_csv(os.path.join(args.outdir, "homolo2celltype.csv"), index=False)
+    with open(os.path.join(args.outdir, "cluster2max.json"), "w") as f:
+        json.dump({str(k): v for k, v in cluster2max.items()}, f, indent=2)
+
+    celltype_weight.to_csv(os.path.join(args.outdir, "celltype_weight.zip"), index=False)
 
     print("Annotation complete.")
     print("Cluster annotations:", cluster2celltype)
+    print("Cluster max-init-weight:", cluster2max)
 
 
 if __name__ == "__main__":

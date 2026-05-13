@@ -20,10 +20,11 @@ def main():
     os.makedirs(config["outdir"], exist_ok=True)
 
     annor = Xener()
-    cluster2celltype, _ = annor.run_from_yaml(args.config)
+    cluster2celltype, cluster2max, debug_params = annor.run_from_yaml(args.config)
 
     print("Pipeline complete.")
     print("Cluster annotations:", cluster2celltype)
+    print("Cluster max-init-weight cell types:", cluster2max)
 
 
 if __name__ == "__main__":

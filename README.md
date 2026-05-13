@@ -150,7 +150,7 @@ moranI_threshold = 0.5
 geneCount, diffgeneCount, annotation = annor.refine_single_cluster(
     adata, topk_markers, cluster_key, cluster_id, candidate_celltype,
     key_added, organ, moranI_threshold)
-# The results can be found in adata.obs[key_added] and the returned annotation DataFrame.
+# The results can be found in the returned annotation[key_added] DataFrame.
 ```
 
 ## Links

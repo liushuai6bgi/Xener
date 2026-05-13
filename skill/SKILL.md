@@ -2,6 +2,10 @@
 name: xener
 description: |
   Xener is a cross-species single-cell cell type annotation tool using knowledge graphs.
+  It maps marker genes from non-model species to model species via BLAST homology,
+  then propagates weights through a knowledge graph to predict cell types per cluster.
+  Supports sub-cluster refinement with Moran's I gene filtering.
+
   Use this skill when users want to annotate single-cell data, predict cell types,
   map genes across species, or run any xener-related tasks.
 
@@ -10,6 +14,7 @@ description: |
   - xener, cross-species gene mapping
   - h5ad file cell type analysis
   - marker gene annotation for clusters
+  - scRNA-seq cluster annotation
 
   CRITICAL: Do NOT write custom Python code. Use ONLY the provided scripts in `scripts/`.
   Do NOT import xener directly. Do NOT write your own pipeline code.
@@ -162,19 +167,39 @@ python scripts/step2_weight.py --input output/marker_gene.zip --method prod --ou
 python scripts/step3_mapping.py --input output/marker_weight.zip \
     --fasta Arabidopsis_thaliana.fasta \
     --species Brassica_rapa \
+    --weight-key pident \
+    --pident 60 --evalue 0.05 --bitscore 200 \
     --outdir output/
 
 # Step 4: Get top-k genes
-python scripts/step4_topk.py --input output/gene_homolo_weight.zip --k 30 --outdir output/
+python scripts/step4_topk.py --input output/gene_homolo_weight.zip --k 30 \
+    --multihomolo --outdir output/
 
 # Step 5: Cell type annotation
 python scripts/step5_annotate.py --input output/topk_markers.zip \
     --outdir output/annotation \
     --organ leaf \
+    --mode path --decay-factor 0.7 \
     --candidate-annotation type1 type2
 ```
 
 **Note**: `--candidate-annotation` restricts cell types. Run without it first to see available types.
+
+### Step Parameter Reference
+
+| Parameter | Step | Default | Description |
+|-----------|------|---------|-------------|
+| `--method` | step2 | `prod` | Weight calculation: `prod` or `sum` |
+| `--weight-key` | step3 | `pident` | Homology weight column: `pident`, `evalue`, `bitscore` |
+| `--pident` | step3 | `60` | Minimum percent identity filter |
+| `--evalue` | step3 | `0.05` | Maximum e-value filter |
+| `--bitscore` | step3 | `200` | Minimum bitscore filter |
+| `--k` | step4 | `30` | Top N genes per cluster |
+| `--multihomolo` | step4 | `true` | Keep multiple homologs per gene |
+| `--mode` | step5 | `path` | Annotation mode: `node` (single type) or `path` (trajectory) |
+| `--decay-factor` | step5 | `0.7` | Weight decay factor for graph propagation |
+| `--organ` | step5 | `None` | Organ filter for knowledge graph |
+| `--threshold` | step5 | `None` | Z-score threshold for cell type filtering |
 
 ### Sub-cluster Refinement
 
@@ -186,14 +211,27 @@ python scripts/refine_cluster.py \
     --cluster-id 0 \
     --celltype type1,type2 \
     --organ leaf \
+    --moran-i 0.5 \
+    --split-method bindiv \
+    --markergene-method diff \
     --outdir output/
 ```
+
+**Refinement parameters**:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--moran-i` | `0.5` | Moran's I threshold for gene filtering. Range [-1, 1]. Closer to 1 = stricter. Invalid values skip filtering. |
+| `--split-method` | `bindiv` | Cell assignment strategy: `bindiv` (binary division) or `argmax` |
+| `--markergene-method` | `diff` | Marker gene set: `diff` (differential only) or `all` |
+| `--key-added` | `xener_refine` | Column name in `adata.obs` for refined annotation |
 
 **Important**: `candidate_celltype` values must come from `celltype_weight.zip` for that specific cluster. Run step5 first to get valid cell type names.
 
 ## Config File Format
 
 ```yaml
+# Required fields
 cluster_key: leiden
 model_species:
   - Brassica_rapa
@@ -201,7 +239,16 @@ non_model_fasta: Arabidopsis_thaliana.fasta
 non_model_h5ad: data.h5ad
 organ: leaf
 outdir: output/
-candidate_annotation:  # optional, restricts cell types
+
+# Optional fields (defaults shown)
+marker_weight_method: prod          # prod | sum
+top_num: 30                         # Top N genes per cluster
+homolo_weight_key: pident           # pident | evalue | bitscore
+multihomolo: true                   # Keep multiple homologs per gene
+decay_factor: 0.7                   # Weight decay for graph propagation
+mode: path                          # node | path
+threshold: null                     # Z-score threshold for filtering
+candidate_annotation:               # Restrict cell types
   - type1
   - type2
 ```
@@ -274,10 +321,43 @@ Replace `<config_file_path>` with the actual config file path (e.g., `config.yam
 
 ## Output Files
 
-- `marker_gene.zip` - marker genes per cluster
-- `marker_weight.zip` - weighted marker genes
-- `gene_homolo_weight.zip` - homology-mapped genes
-- `topk_markers.zip` - top-k genes per cluster
-- `annotation/cluster_*/` - per-cluster annotation results
-- `celltype_weight.zip` - all predicted cell types per cluster (use these values for `candidate_celltype` in refinement)
-- `refine_suggestions.json` - suggested clusters for refinement (from `suggest_refine.py`)
+The pipeline generates the following outputs in `outdir/`:
+
+| File | Description |
+|------|-------------|
+| `marker_gene.zip` | Marker genes per cluster |
+| `marker_weight.zip` | Weighted marker genes |
+| `blastp_{species}.zip` | BLASTP alignment results (one per model species) |
+| `gene_homolo_weight.zip` | Homology-mapped genes with weights |
+| `topk_markers.zip` | Top-k genes per cluster |
+| `celltype_weight.zip` | All predicted cell types per cluster (use for refinement `candidate_celltype`) |
+| `debug_params.yaml` | Actual parameters used in each step (for reproducibility) |
+| `config.yaml` | Config copy (from `run_from_yaml` only) |
+| `annotation/` | Per-cluster annotation XML files (`cluster_{id}_gene2celltype.xml`) |
+| `refine_suggestions.json` | Suggested clusters for refinement (from `suggest_refine.py`) |
+
+**Script intermediate files**: The step scripts save intermediate CSVs (e.g., `marker_gene.zip`, `marker_weight.zip`) for checkpointing. The full pipeline saves `.zip` files.
+
+### debug_params.yaml
+
+Records the actual parameter values used in each key step:
+
+```yaml
+cell_annotation:
+  decay_factor: 0.7
+  mode: path
+  organ: leaf
+  threshold: null
+get_gene_weight:
+  marker_weight_method: prod
+get_topk_gene:
+  multihomolo: true
+  top_num: 30
+mapping:
+  bitscore: 200
+  evalue: 0.05
+  homolo_weight_key: pident
+  model_species:
+  - Oryza_sativa
+  pident: 60
+```

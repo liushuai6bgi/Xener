@@ -30,7 +30,7 @@ def main():
         batch_key=args.batch_key
     )
 
-    output_path = os.path.join(args.outdir, "marker_gene.csv")
+    output_path = os.path.join(args.outdir, "marker_gene.zip")
     markers.to_csv(output_path, index=False)
     print(f"Marker genes saved to {output_path}")
     print(f"Shape: {markers.shape}")
