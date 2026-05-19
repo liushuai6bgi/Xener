@@ -153,6 +153,30 @@ geneCount, diffgeneCount, annotation = annor.refine_single_cluster(
 # The results can be found in the returned annotation[key_added] DataFrame.
 ```
 
+## Claude Code / AI Agent Skill
+
+An agent skill definition is provided at [skill/xener/SKILL.md](skill/xener/SKILL.md) for use with Claude Code and compatible AI coding assistants. The skill guides the agent through the full xener workflow: installation → config validation → species/organ selection → pipeline execution → refinement suggestion.
+
+### Scripts
+
+All available scripts are in [skill/xener/scripts/](skill/xener/scripts/):
+
+| Script | Purpose |
+|--------|---------|
+| `install.py` | Install xener package |
+| `list_species.py` | Query available reference species from BLAST database |
+| `list_organs.py` | Query available organs from knowledge graph |
+| `run_pipeline.py` | Run the full annotation pipeline from a config file |
+| `step1_markers.py` | Get marker genes per cluster |
+| `step2_weight.py` | Calculate gene weights |
+| `step3_mapping.py` | BLAST homology mapping |
+| `step4_topk.py` | Get top-k genes |
+| `step5_annotate.py` | Cell type annotation |
+| `refine_cluster.py` | Sub-cluster refinement |
+| `suggest_refine.py` | Suggest refinement candidates from annotation results |
+
+For agent usage details, refer to [skill/xener/SKILL.md](skill/xener/SKILL.md).
+
 ## Links
 
 [Homepage](https://xenor.dcs.cloud/): https://xenor.dcs.cloud/
