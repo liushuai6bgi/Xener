@@ -11,6 +11,7 @@ import pandas as pd
 import networkx as nx
 import scipy.sparse as sp
 import scanpy.external as sce
+from scipy.sparse import issparse
 
 from .utils import logger
 from .utils import (
@@ -19,7 +20,7 @@ from .utils import (
 from .utils.blast import makeblastdb, get_blastdb, blastp
 from .utils.seq import extract_fasta_by_name, translate2protein
 from .utils.kg import KGClient
-from .utils.h5ad import read_h5ad, write_h5ad, quality_control
+from .utils.h5ad import read_h5ad, write_h5ad, quality_control, process
 from .config import _XENER_DATA_DIR, _ensure_data
 
 class Xener:
@@ -226,8 +227,7 @@ class Xener:
 
         return cluster2celltype, cluster2max_initweight_celltype, debug_params
     
-    def get_markers(self, adata:sc.AnnData, cluster_key:str=None,
-                    preprocess:bool=False, batch_key:str=None) -> pd.DataFrame:
+    def get_markers(self, adata:sc.AnnData, cluster_key:str=None) -> pd.DataFrame:
         '''
         Preprocess and analyze single-cell data, returning marker genes.
         Parameters:
@@ -238,28 +238,18 @@ class Xener:
             pd.DataFrame: Result of scanpy.get.rank_genes_groups_df
         '''
         logger.info(f'>>>getting markers cluster_key[{cluster_key}].')
-        if preprocess:
-            adata = quality_control(adata)
-            sc.pp.highly_variable_genes(
-                adata,
-                n_top_genes=2000,       # Select 2000 highly variable genes
-                subset=True            # Automatically filter and retain highly variable genes
-            )
-            sc.pp.pca(adata)
-        if batch_key:
-            # bbknn can run PCA by default, and its output as an optimized version of neighbors is consistent with sc.pp.neighbors
-            # bbknn does not modify expression data; since we don't directly use expression data afterward, using bbknn should be fine
-            sce.pp.bbknn(adata, batch_key=batch_key)
+        process(adata)
         if adata.obs[cluster_key].dtype != 'str':
             adata.obs[cluster_key] = adata.obs[cluster_key].astype('str')
-        use_raw = hasattr(adata, 'raw') and adata.raw is not None
-        logger.info('use_raw[%s] for marker analysis', use_raw)
+        raw_available = hasattr(adata, 'raw') and adata.raw is not None
+        use_raw = raw_available and issparse(adata.raw.X)
+        if not use_raw and not issparse(adata.X):
+            logger.error('Unavailable data! cann\'t find available counts.')
+            raise Exception('Unavailable data! cann\'t find available counts.')
+
         sc.tl.rank_genes_groups(adata, groupby=cluster_key, key_added = "rank_genes_groups", use_raw=use_raw, pts=True)
         # Get gene ranking table = number of clusters * number of genes
         markers = sc.get.rank_genes_groups_df(adata, group=None, key='rank_genes_groups')
-        if use_raw:
-            # keep the genes in adata.var_names
-            markers = markers[markers['names'].isin(adata.var_names)]
         return markers.drop(columns=['scores'])
         
     def get_gene_weight(self, markers:pd.DataFrame, marker_weight_method:Literal['prod','sum']=None) -> tuple[pd.DataFrame, dict]:
