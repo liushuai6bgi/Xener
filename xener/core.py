@@ -13,14 +13,12 @@ import scipy.sparse as sp
 import scanpy.external as sce
 from scipy.sparse import issparse
 
+from . import utils
 from .utils import logger
-from .utils import (
-    deliver_weight_on_graph_max, deliver_weight_on_graph_sum, build_graph_from_adjust_matrix, 
-    tempered_softmax_contributions)#, check_celltype)
-from .utils.blast import makeblastdb, get_blastdb, blastp
-from .utils.seq import extract_fasta_by_name, translate2protein
+from .utils.blast import get_blastdb, blastp
+from .utils.seq import extract_fasta_by_name
 from .utils.kg import KGClient
-from .utils.h5ad import read_h5ad, write_h5ad, quality_control, process
+from .utils.h5ad import read_h5ad, write_h5ad, process
 from .config import _XENER_DATA_DIR, _ensure_data
 
 class Xener:
@@ -101,7 +99,7 @@ class Xener:
                  non_model_fasta:str, model_species:list[str],
                  marker_weight_method:Literal['prod', 'sum']=None, top_num:int=None,
                  homolo_weight_key:str=None, multihomolo:bool=None,
-                 organ:str=None, threshold:float=None,
+                 organ:str=None, threshold:float=None, mapping_strict:int=0, ann_strict:int=0,
                  mode:Literal['node','path']=None, decay_factor:float=None,
                  save:bool=True, **kv_blastp_args) -> tuple[dict, dict, dict]:
         '''
@@ -116,6 +114,8 @@ class Xener:
             marker_weight_method: Weighting method, 'prod' or 'sum'.
             organ: Organ name for knowledge graph filtering.
             threshold: Z-score threshold for filtering cell types.
+            mapping_strict: Strict mode for homology mapping (-1=loose, 0=default, 1=per-group max).
+            ann_strict: Strict mode for annotation (0=default, 1=per-row max, 2=global max).
             mode: Annotation mode, 'node' or 'path'.
             decay_factor: Decay factor for graph weight propagation.
             multihomolo: Whether to allow multiple homologs per gene.
@@ -182,7 +182,7 @@ class Xener:
         if not gene_homolo_weight_loaded:
             logger.info('generating gene_homolo_weight ...')
             gene_homolo_weight, debug_mapping = self.mapping(marker_weight, non_model_fasta, model_species, outdir,
-                                              homolo_weight_key, **kv_blastp_args)
+                                              homolo_weight_key, mapping_strict, **kv_blastp_args)
             debug_params['mapping'] = debug_mapping
             if save:
                 gene_homolo_weight.to_csv(gene_homolo_weight_path, index=False)
@@ -212,7 +212,7 @@ class Xener:
         annotation_info_path = outdir / 'annotation'
         cluster2celltype, cluster2max_initweight_celltype, celltype_weight, debug_annotation = self.cell_annotation(
             topk_markers, annotation_info_path, organ, threshold,
-            mode=mode, decay_factor=decay_factor)
+            ann_strict, mode=mode, decay_factor=decay_factor)
         debug_params['cell_annotation'] = debug_annotation
         if save:
             celltype_weight_path = outdir / 'celltype_weight.zip'
@@ -345,7 +345,7 @@ class Xener:
         return result, debug_params
         
     def mapping(self, markers:pd.DataFrame, non_model_fasta:str, 
-            model_species:list[str], outdir:str, homolo_weight_key=None,
+            model_species:list[str], outdir:str, homolo_weight_key=None, mapping_strict:int=0,
             num_threads:int=None, pident=60, evalue=0.05, bitscore=200, **kv_blastp_args) -> tuple[pd.DataFrame, dict]:
         '''
         Run BLAST to find homologous genes and integrate them into markers.
@@ -418,11 +418,23 @@ class Xener:
         # merged_data['homolo_weight'] = merged_data['homolo_weight'] / merged_data.groupby('gene')['homolo_weight'].transform('sum')
         if origin_group_num!=len(merged_data['group'].unique()):
             logger.warning('%s groups merged to %s groups in mapping', origin_group_num, len(merged_data["group"].unique()))
+        # only keep the top weight raws per group
+        if mapping_strict < 0:
+            logger.warning(f'mapping_strict[{mapping_strict}] is too loose!')
+            merged_data['homolo_weight'] = 1
+        elif mapping_strict == 1:
+            max_vals = merged_data.groupby(['group', 'gene'])['homolo_weight'].transform('max')
+            merged_data = merged_data[max_vals == merged_data['homolo_weight']]
+            drop_dup_shape = merged_data[['group', 'gene']].drop_duplicates().shape[1]
+            if merged_data.shape[1] != drop_dup_shape:
+                # multiple mapping
+                logger.warning('multiple mapping detected!')
+        
         blast_result_with_weight = merged_data.sort_values(by=['group', 'weight'], ascending=[True, False])
         return blast_result_with_weight, debug_params
         
     def cell_annotation(self, blast_result,
-            outdir:Path, organ=None, threshold:int=None,
+            outdir:Path, organ=None, threshold:int=None, ann_strict:int=0,
             mode:Literal['node','path']=None, decay_factor:float=None) -> tuple[dict, dict, pd.DataFrame, dict]:
         '''
         Annotate each cell cluster and save celltype weight information for each cluster.
@@ -465,7 +477,7 @@ class Xener:
             cluster2celltype[group], cluster2max_initweight_celltype[group], celltypes,\
                   weights, init_weights = self.cell_annotation_cluster_singlecluster(
                 blast_result[blast_result['group'] == group],
-                f'cluster_{group}', outdir, organ,
+                f'cluster_{group}', outdir, organ, ann_strict,
                 threshold=threshold, mode=mode, decay_factor=decay_factor)
 
             cluster_list += [group] * len(celltypes)
@@ -482,7 +494,7 @@ class Xener:
         return cluster2celltype, cluster2max_initweight_celltype, celltype_weight, debug_params
         
     def cell_annotation_cluster_singlecluster(self, blast_result:pd.DataFrame, 
-            output_prefix, outdir:Path, organ=None, 
+            output_prefix, outdir:Path, organ=None, ann_strict:int=0,
             threshold:int=None, mode:Literal['node','path']='node', decay_factor:float=0.9
         ) -> tuple[str, list[str], list[float]]:
         '''
@@ -507,7 +519,30 @@ class Xener:
         homolo_nodes = blast_result['homolo'].unique().tolist()
         _, celltype_nodes, homolo2celltype_matrix = self.KG.get_gene2celltype_kg(
             homolo_nodes, organ)# Do not limit when querying knowledge graph
+        
+        if ann_strict < 0:
+            logger.warning(f'ann_strict[{ann_strict}] is too loose!')
+            homolo2celltype_matrix = (homolo2celltype_matrix != 0).astype(int)
+        elif ann_strict > 0:
+            if ann_strict == 1 and homolo2celltype_matrix.shape[1] > 1:
+                # keep the max confidence path per marker
+                print('homolo_nodes', homolo_nodes, homolo2celltype_matrix.shape, celltype_nodes)
+                homolo2celltype_matrix = utils.keep_max(homolo2celltype_matrix, axis=1)
+            elif ann_strict == 2 and sum(homolo2celltype_matrix.shape) > 2:
+                # keep the max confidence path in matrix
+                homolo2celltype_matrix = utils.keep_max(homolo2celltype_matrix, axis=-1)
+            else:
+                logger.warning('ann_strict %s is not supported for shape[%s], skip.', ann_strict, homolo2celltype_matrix.shape)
 
+            homolo2celltype_matrix, removed_rows, removed_cols = utils.remove_zeros(homolo2celltype_matrix)
+            logger.info('removed homolos[%s] and celltype[%s]', 
+                        round(len(removed_rows)*100/len(homolo_nodes), 1), 
+                        round(len(removed_cols)*100/len(celltype_nodes), 1))
+            for i in sorted(removed_cols, reverse=True):
+                del celltype_nodes[i]
+            for i in sorted(removed_rows, reverse=True):
+                del homolo_nodes[i]
+            
         # Decay the relationship between homologous genes and cell types; the more cell types connected to a homologous gene, the less distinguishable they are, and the more decay is applied
         sum_result = homolo2celltype_matrix.sum(axis=1)
         # Check for homolos not appearing in the knowledge graph
@@ -521,7 +556,7 @@ class Xener:
         decay_coefficient = 1.1 - sp.csr_matrix(sum_result) / divisor
         homolo2celltype_matrix = homolo2celltype_matrix.multiply(decay_coefficient).tocsr()
 
-        sub_g_homolo2celltype = build_graph_from_adjust_matrix(
+        sub_g_homolo2celltype = utils.build_graph_from_adjust_matrix(
             homolo2celltype_matrix,
             ['homolo_'+i for i in homolo_nodes],
             celltype_nodes,
@@ -535,8 +570,11 @@ class Xener:
         gene_nodes = blast_result['gene'].unique().tolist()
         gene2homolo_matrix = sp.lil_matrix((len(gene_nodes), len(homolo_nodes)))
         for _, row in blast_result.iterrows():
-            gene_idx = gene_nodes.index(row['gene'])
-            homolo_idx = homolo_nodes.index(row['homolo'])
+            gene_name, homolo_name = row['gene'], row['homolo']
+            if gene_name not in gene_nodes or homolo_name not in homolo_nodes:  # Ignore genes not in the blast result
+                continue
+            gene_idx = gene_nodes.index(gene_name)
+            homolo_idx = homolo_nodes.index(homolo_name)
             gene2homolo_matrix[gene_idx, homolo_idx] = row['homolo_weight']
         # Get gene weights
         gene_weight = []
@@ -545,7 +583,7 @@ class Xener:
                 blast_result[blast_result['gene'] == gene_node]['weight'].iloc[0]
             )
         logger.info('%s: min=%s, max=%s', output_prefix, min(gene_weight), max(gene_weight))
-        sub_g_gene2homolo = build_graph_from_adjust_matrix(
+        sub_g_gene2homolo = utils.build_graph_from_adjust_matrix(
             gene2homolo_matrix.tocsr(), 
             ['gene_'+i for i in gene_nodes], 
             ['homolo_'+i for i in homolo_nodes], 
@@ -557,7 +595,7 @@ class Xener:
         # Merge the two graphs
         sub_g_gene2celltype = nx.compose(sub_g_homolo2celltype, sub_g_gene2homolo)
 
-        sub_g_gene2celltype = deliver_weight_on_graph_sum(sub_g_gene2celltype, 'weight', 'relation_confidence')
+        sub_g_gene2celltype = utils.deliver_weight_on_graph_sum(sub_g_gene2celltype, 'weight', 'relation_confidence')
         # Extract gene to celltype relationships
         gene2celltype_matrix = sp.lil_matrix((len(gene_nodes), len(celltype_nodes)))
         for celltype in celltype_nodes:
@@ -616,7 +654,7 @@ class Xener:
                         celltype2celltype_matrix[:, idx] = -abs(celltype2celltype_matrix[:, idx])
 
                 node_attr=[{'weight':0} for _ in new_celltypes]
-                sub_g_celltype2celltype = build_graph_from_adjust_matrix(
+                sub_g_celltype2celltype = utils.build_graph_from_adjust_matrix(
                     celltype2celltype_matrix,
                     new_celltypes,
                     new_celltypes,
@@ -634,7 +672,7 @@ class Xener:
                         else:
                             sub_g_celltype2celltype.nodes[node]['weight'] = 0
                             sub_g_celltype2celltype.nodes[node]['initial_weight'] = 0
-                    sub_g_celltype2celltype = deliver_weight_on_graph_max(sub_g_celltype2celltype, 'weight', 'relation_confidence', alpha=decay_factor)
+                    sub_g_celltype2celltype = utils.deliver_weight_on_graph_max(sub_g_celltype2celltype, 'weight', 'relation_confidence', alpha=decay_factor)
                     # Update weight information
                     weight_distribution = {node: sub_g_celltype2celltype.nodes[node] for node in sub_g_celltype2celltype.nodes}
                     sorted_nodes = sorted(weight_distribution.items(), key=lambda item: item[1]['weight'], reverse=True)
@@ -655,7 +693,7 @@ class Xener:
                     celltype2celltype_matrix[:, idx] = -abs(celltype2celltype_matrix[:, idx])
 
             node_attr=[{'weight':0} for _ in new_celltypes]
-            sub_g_celltype2celltype = build_graph_from_adjust_matrix(
+            sub_g_celltype2celltype = utils.build_graph_from_adjust_matrix(
                 celltype2celltype_matrix,
                 new_celltypes, new_celltypes,
                 'relation_confidence',
@@ -669,7 +707,7 @@ class Xener:
                 else:
                     sub_g_celltype2celltype.nodes[node]['weight'] = 0
                     sub_g_celltype2celltype.nodes[node]['initial_weight'] = 0
-            sub_g_celltype2celltype = deliver_weight_on_graph_max(sub_g_celltype2celltype, 'weight', 'relation_confidence')
+            sub_g_celltype2celltype = utils.deliver_weight_on_graph_max(sub_g_celltype2celltype, 'weight', 'relation_confidence')
             # Update weight information
             weight_distribution = {node: sub_g_celltype2celltype.nodes[node] for node in sub_g_celltype2celltype.nodes}
             sorted_nodes = sorted(weight_distribution.items(), key=lambda item: item[1]['weight'], reverse=True)
@@ -681,7 +719,7 @@ class Xener:
                 parents = [node for node in sub_g_celltype2celltype.predecessors(celltype[-1])]
                 # Get weights of all parent nodes
                 parent_weights = [weight_distribution[parent]['weight'] for parent in parents]
-                weight_array = tempered_softmax_contributions(parent_weights)
+                weight_array = utils.tempered_softmax_contributions(parent_weights)
                 # parent_index = np.argmax(weight_array)
                 # celltype.append(parents[parent_index])
                 indices = np.where(weight_array > 0.15)[0].tolist()
@@ -720,9 +758,9 @@ class Xener:
         nx.write_gexf(graph_gene2celltypes, outdir / f'{output_prefix}_gene2celltype.xml')
         return celltype, max_initweight_celltype, celltype_list, weight_list, initial_weight_list
 
-    def refine(self, adata:sc.AnnData, group_gene_homolo_weight:pd.DataFrame, 
-               celltypes_weight:pd.DataFrame, key_added:str, 
-               cluster_key:str='leiden', topk=5, organ:str=None):
+    def refine(self, adata:sc.AnnData, group_gene_homolo_weight:pd.DataFrame,
+               celltypes_weight:pd.DataFrame, key_added:str,
+               cluster_key:str='leiden', topk=5, organ:str=None, strict:int=0):
         '''
         Perform finer annotation for each cluster.
         Parameters:
@@ -747,8 +785,8 @@ class Xener:
 
         # Annotate each cluster
         for key, celltypes in data_need_refine:
-            self.refine_single_cluster(adata, group_gene_homolo_weight, cluster_key, key, 
-                                        celltypes, key_added, organ=organ)
+            self.refine_single_cluster(adata, group_gene_homolo_weight, cluster_key, key,
+                                        celltypes, key_added, organ=organ, strict=strict)
 
     @staticmethod
     def filt_marker_by_moranI(adata:sc.AnnData, moranI_threshold:float=0.5) -> list[str]:
@@ -772,7 +810,7 @@ class Xener:
 
     def refine_single_cluster(self, adata:sc.AnnData, group_gene_homolo_weight:pd.DataFrame, 
             cluster_key:str, cluster_id:str, candidate_celltype:list[str], 
-            key_added:str, organ:str=None, moranI_threshold=0.5, 
+            key_added:str, organ:str=None, moranI_threshold=0.5, strict:int=0,
             split_method:Literal['bindiv','argmax']='bindiv', 
             markergene_method:Literal['diff','all']='diff', celltype_geneCount_gene=None):
         '''
@@ -824,6 +862,15 @@ class Xener:
                 homolo_nodes=list(homolo2gene.keys()),
                 organ=organ, 
                 candidate_type=candidate_celltype)
+            
+            if strict > 0:
+                matrix = utils.keep_max(matrix, axis=0)
+                matrix, removed_rows, removed_cols = utils.remove_zeros(matrix)
+                for i in sorted(removed_cols, reverse=True):
+                    del source[i]
+                for i in sorted(removed_rows, reverse=True):
+                    del target[i]
+            
             celltype2markers = dict()
             X_coo = matrix.tocoo()
             for i, j, v in zip(X_coo.row, X_coo.col, X_coo.data):

@@ -26,6 +26,8 @@ def main():
                         help="Minimum bitscore filter")
     parser.add_argument("--num-threads", type=int, default=None,
                         help="Number of threads for BLAST")
+    parser.add_argument("--mapping-strict", type=int, default=0,
+                        help="Strict mode for BLAST mapping: <0=loose (weight=1), 0=default, 1=top per group/gene")
     args = parser.parse_args()
 
     outdir = Path(args.outdir)
@@ -43,7 +45,8 @@ def main():
         pident=args.pident,
         evalue=args.evalue,
         bitscore=args.bitscore,
-        num_threads=args.num_threads
+        num_threads=args.num_threads,
+        mapping_strict=args.mapping_strict
     )
 
     output_path = os.path.join(args.outdir, "gene_homolo_weight.zip")

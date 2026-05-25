@@ -169,6 +169,7 @@ python scripts/step3_mapping.py --input output/marker_weight.zip \
     --species Brassica_rapa \
     --weight-key pident \
     --pident 60 --evalue 0.05 --bitscore 200 \
+    --mapping-strict 0 \
     --outdir output/
 
 # Step 4: Get top-k genes
@@ -180,6 +181,7 @@ python scripts/step5_annotate.py --input output/topk_markers.zip \
     --outdir output/annotation \
     --organ leaf \
     --mode path --decay-factor 0.7 \
+    --ann-strict 0 \
     --candidate-annotation type1 type2
 ```
 
@@ -200,6 +202,8 @@ python scripts/step5_annotate.py --input output/topk_markers.zip \
 | `--decay-factor` | step5 | `0.7` | Weight decay factor for graph propagation |
 | `--organ` | step5 | `None` | Organ filter for knowledge graph |
 | `--threshold` | step5 | `None` | Z-score threshold for cell type filtering |
+| `--mapping-strict` | step3 | `0` | <0=ignore BLAST quality (all weights=1), 0=balanced, 1=suppress multi-copy gene families |
+| `--ann-strict` | step5 | `0` | <0=exploratory (more cell types predicted), 0=balanced, 1=cleaner (1 type/marker), 2=strictest (1 type/cluster) |
 
 ### Sub-cluster Refinement
 
@@ -214,6 +218,7 @@ python scripts/refine_cluster.py \
     --moran-i 0.5 \
     --split-method bindiv \
     --markergene-method diff \
+    --strict 0 \
     --outdir output/
 ```
 
@@ -225,6 +230,7 @@ python scripts/refine_cluster.py \
 | `--split-method` | `bindiv` | Cell assignment strategy: `bindiv` (binary division) or `argmax` |
 | `--markergene-method` | `diff` | Marker gene set: `diff` (differential only) or `all` |
 | `--key-added` | `xener_refine` | Column name in `adata.obs` for refined annotation |
+| `--strict` | `0` | 0=default, >0=keep only max-confidence cell type per gene — cleaner sub-cluster annotation |
 
 **Important**: `candidate_celltype` values must come from `celltype_weight.zip` for that specific cluster. Run step5 first to get valid cell type names.
 
@@ -248,6 +254,8 @@ multihomolo: true                   # Keep multiple homologs per gene
 decay_factor: 0.7                   # Weight decay for graph propagation
 mode: path                          # node | path
 threshold: null                     # Z-score threshold for filtering
+mapping_strict: 0                   # <0=ignore BLAST quality, 0=balanced, 1=suppress multi-copy families
+ann_strict: 0                       # <0=exploratory (more types), 0=balanced, 1=cleaner (1 type/marker), 2=strictest (1 type/cluster)
 candidate_annotation:               # Restrict cell types
   - type1
   - type2
@@ -344,6 +352,7 @@ Records the actual parameter values used in each key step:
 
 ```yaml
 cell_annotation:
+  ann_strict: 0
   decay_factor: 0.7
   mode: path
   organ: leaf
@@ -357,6 +366,7 @@ mapping:
   bitscore: 200
   evalue: 0.05
   homolo_weight_key: pident
+  mapping_strict: 0
   model_species:
   - Oryza_sativa
   pident: 60

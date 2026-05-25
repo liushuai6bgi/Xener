@@ -25,6 +25,8 @@ def main():
                         help="Cluster split method")
     parser.add_argument("--markergene-method", default="diff", choices=["diff", "all"],
                         help="Marker gene method")
+    parser.add_argument("--strict", type=int, default=0,
+                        help="Strict mode: 0=default, >0=keep max-confidence cell type per gene")
     args = parser.parse_args()
 
     os.makedirs(args.outdir, exist_ok=True)
@@ -52,7 +54,8 @@ def main():
         organ=args.organ,
         moranI_threshold=args.moran_i,
         split_method=args.split_method,
-        markergene_method=args.markergene_method
+        markergene_method=args.markergene_method,
+        strict=args.strict
     )
 
     # Save refined annotation

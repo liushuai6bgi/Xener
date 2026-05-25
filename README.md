@@ -32,6 +32,8 @@ non_model_fasta: Arabidopsis_thaliana.fasta
 non_model_h5ad: ERP132245.h5ad
 organ: leaf
 outdir: output/ERP132245
+mapping_strict: 0       # <0=ignore BLAST quality, 0=balanced, 1=suppress multi-copy families
+ann_strict: 0           # <0=exploratory (more types), 0=balanced, 1=cleaner (1 type/marker), 2=strictest (1 type/cluster)
 ```
 
 ### Programmatic API
@@ -47,6 +49,8 @@ cluster2celltype, _, debug_params = annor(
     non_model_fasta='Arabidopsis_thaliana.fasta',
     model_species=['Brassica_rapa'],
     organ='leaf',
+    mapping_strict=0,   # <0=ignore BLAST quality, 0=balanced, 1=suppress multi-copy families
+    ann_strict=0,       # <0=exploratory (more types), 0=balanced, 1=cleaner (1 type/marker), 2=strictest (1 type/cluster)
 )
 ```
 
@@ -136,6 +140,26 @@ mapping:
   pident: 60
 ```
 
+## Strict modes
+
+The pipeline supports three levels of strictness (`mapping_strict`, `ann_strict`) for filtering ambiguous homology and annotation results:
+
+| Value | mapping_strict (BLAST) | ann_strict (KG query) |
+|-------|----------------------|----------------------|
+| **< 0** | All `homolo_weight` = 1. Every homolog carries equal weight regardless of identity. **Result: more genes retained, but BLAST quality is ignored — use when BLAST scores are unreliable.** | All non-zero weights → 1. Every marker–celltype link gets equal vote. **Result: more cell types predicted per cluster, but with lower precision — use for broad exploratory annotation.** |
+| **0** (default) | Raw BLAST weights as-is. **Result: balanced — strong homologs contribute more, weak ones less.** | Raw KG weights as-is. **Result: balanced default.** |
+| **1** | Keep only the top weight per (gene group, gene). **Result: prevents multi-copy gene families from dominating within a species group.** | Keep only the max-confidence cell type per marker gene (row-wise). **Result: each marker votes for one cell type — fewer, cleaner predictions per cluster.** |
+| **2** | Same as 0. | Keep only the single global max-confidence cell type. **Result: only one cell type survives — use when you need a single definitive answer per cluster.** |
+
+In the `refine_single_cluster` step, `strict>0` keeps only the max-confidence cell type per gene (column-wise) and removes zero rows/columns. **Result: cleaner sub-cluster annotation with fewer ambiguous assignments.**
+
+```python
+# Example: strict annotation
+cluster2celltype, _, _, _ = annor.cell_annotation(
+    topk_markers, outdir / 'annotation', organ,
+    ann_strict=1)  # keep only the best cell type per marker gene
+```
+
 ## Sub-cluster refinement
 
 ```python
@@ -149,7 +173,8 @@ moranI_threshold = 0.5
 
 geneCount, diffgeneCount, annotation = annor.refine_single_cluster(
     adata, topk_markers, cluster_key, cluster_id, candidate_celltype,
-    key_added, organ, moranI_threshold)
+    key_added, organ, moranI_threshold, strict=0)
+# Set strict>0 to keep only max-confidence cell types per gene.
 # The results can be found in the returned annotation[key_added] DataFrame.
 ```
 

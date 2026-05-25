@@ -1,9 +1,7 @@
 import os
-import json
 from typing import Literal
 
 import numpy as np
-import pandas as pd
 import scipy.sparse as sp
 import networkx as nx
 from .logger import logger
@@ -28,50 +26,6 @@ def name2path(path:str, postfix:list[str]) -> dict[str, str]:
                     raise Exception(f"重复的名称:{file_name}")
                 name2path[file_name] = os.path.join(subdir, file)
     return name2path
-
-def filter_top_k_col_per_row(adj_matrix:sp.csr_matrix, k:int, col:list) -> tuple[sp.csr_matrix, list]:
-    """
-    Filter the top-k highest-weight non-zero columns per row.
-
-    Args:
-        adj_matrix: Sparse adjacency matrix.
-        k: Number of top-weight columns to retain per row.
-        col: List of column names.
-
-    Returns:
-        Filtered sparse matrix and corresponding column name list.
-    """
-    adj_matrix = adj_matrix.tocsr()
-    num_row, num_col = adj_matrix.shape
-    result_matrix = sp.lil_matrix((num_row, num_col))
-
-    for i in range(num_row):
-        gene_indices = adj_matrix[i, :].nonzero()[1]
-        weights = adj_matrix[i, gene_indices].toarray().flatten()
-        top_k_indices = np.argsort(weights)[-k:]
-        for idx in top_k_indices:
-            result_matrix[i, gene_indices[idx]] = adj_matrix[i, gene_indices[idx]]
-    result_matrix = result_matrix.tocsr()
-    col_sums = result_matrix.sum(axis=0)
-    non_empty_cols = np.where(col_sums > 0)[1]
-    return result_matrix[:, non_empty_cols], [ col[idx] for idx in non_empty_cols.tolist() ]
-
-def joint_matrix(matrix_NxN:sp.csr_matrix, matrix_NxM:sp.csr_matrix, matrix_MxM:sp.csr_matrix):
-    """
-    Joint embedding: combine three matrices into a single sparse matrix.
-
-    Args:
-        matrix_NxN: Top-left matrix (N x N).
-        matrix_NxM: Top-right matrix (N x M).
-        matrix_MxM: Bottom-right matrix (M x M).
-
-    Returns:
-        Combined sparse matrix ((N+M) x (N+M)).
-    """
-    return sp.vstack([
-                sp.hstack([matrix_NxN, matrix_NxM]),
-                sp.hstack([matrix_NxM.T, matrix_MxM])
-            ]).tocsr()
 
 def deliver_weight_on_graph_sum(graph:nx.DiGraph, node_key:str, edge_key:str, weight_recorder_key:str='recorder', neg_edge:bool=False, alpha:float=0.9) -> nx.DiGraph:
     """
@@ -218,3 +172,86 @@ def tempered_softmax_contributions(weights, temperature=1.0):
     weights_shifted = weights - np.max(weights)
     exp_weights = np.exp(weights_shifted / temperature)
     return exp_weights / np.sum(exp_weights)
+
+def keep_max(sp_m:sp.csr_matrix, axis:int) -> sp.csr_matrix:
+    """
+    Keep only the maximum value(s) along the specified axis.
+    
+    Parameters
+    ----------
+    axis : int
+        - axis=1 : Keep only the maximum value in each row.
+        - axis=0 : Keep only the maximum value in each column.
+        - else : Keep only the maximum value globally.
+    
+    Shape is preserved. Returns a new sparse matrix.
+    """
+    C = sp_m.tocoo()
+
+    def _flatten_max(max_result):
+        if hasattr(max_result, 'toarray'):
+            max_result = max_result.toarray()
+        return np.asarray(max_result).flatten()
+
+    if axis == 1:
+        max_vals = _flatten_max(sp_m.max(axis=1))
+        keep = C.data == max_vals[C.row]
+    elif axis == 0:
+        max_vals = _flatten_max(sp_m.max(axis=0))
+        keep = C.data == max_vals[C.col]
+    else:
+        global_max = sp_m.max()
+        keep = C.data == global_max
+    
+    result = sp.csr_matrix(
+        (C.data[keep], (C.row[keep], C.col[keep])),
+        shape=sp_m.shape
+    )
+    return result
+
+def remove_zeros(sp_m: sp.spmatrix, axis: int | None = None) -> tuple[sp.csr_matrix, list[int], list[int]]:
+    """
+    Remove zero rows and/or columns from a sparse matrix.
+    
+    Parameters
+    ----------
+    axis : int or None
+        - 0 : remove zero rows only
+        - 1 : remove zero columns only
+        - None : remove both zero rows and zero columns
+                 (rows and cols are detected on the original matrix, then removed together)
+    
+    Returns
+    -------
+    If axis=0: (clean_matrix, removed_rows)
+    If axis=1: (clean_matrix, removed_cols)
+    If axis=None: (clean_matrix, removed_rows, removed_cols)
+    """
+    sp_m = sp_m.tocsr()
+    removed_rows, removed_cols = [], []
+    
+    if axis == 0:
+        row_nnz = np.diff(sp_m.indptr)
+        keep_rows = np.where(row_nnz > 0)[0]
+        removed_rows = np.where(row_nnz == 0)[0].tolist()
+        clean = sp_m[keep_rows, :]
+    
+    elif axis == 1:
+        csc = sp_m.tocsc()
+        col_nnz = np.diff(csc.indptr)
+        keep_cols = np.where(col_nnz > 0)[0]
+        removed_cols = np.where(col_nnz == 0)[0].tolist()
+        clean = csc[:, keep_cols]
+    
+    else:
+        row_nnz = np.diff(sp_m.indptr)
+        keep_rows = np.where(row_nnz > 0)[0]
+        removed_rows = np.where(row_nnz == 0)[0].tolist()
+        
+        csc = sp_m.tocsc()
+        col_nnz = np.diff(csc.indptr)
+        keep_cols = np.where(col_nnz > 0)[0]
+        removed_cols = np.where(col_nnz == 0)[0].tolist()
+        
+        clean = sp_m[keep_rows, :][:, keep_cols]
+    return clean, removed_rows, removed_cols

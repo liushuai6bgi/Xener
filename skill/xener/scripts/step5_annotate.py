@@ -23,6 +23,8 @@ def main():
                         help="Annotation mode: node (single type) or path (developmental trajectory)")
     parser.add_argument("--decay-factor", type=float, default=0.7,
                         help="Weight decay factor for graph propagation")
+    parser.add_argument("--ann-strict", type=int, default=0,
+                        help="Strict mode for annotation: <0=loose (binarize), 0=default, 1=max per marker, 2=global max")
     args = parser.parse_args()
 
     outdir = Path(args.outdir)
@@ -38,7 +40,8 @@ def main():
             organ=args.organ,
             threshold=args.threshold,
             mode=args.mode,
-            decay_factor=args.decay_factor
+            decay_factor=args.decay_factor,
+            ann_strict=args.ann_strict
         )
 
     # Save results
