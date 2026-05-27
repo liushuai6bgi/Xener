@@ -101,7 +101,7 @@ class Xener:
                  homolo_weight_key:str=None, multihomolo:bool=None,
                  organ:str=None, threshold:float=None, mapping_strict:int=0, ann_strict:int=0,
                  mode:Literal['node','path']=None, decay_factor:float=None,
-                 save:bool=True, **kv_blastp_args) -> tuple[dict, dict, dict]:
+                 save:bool=True, **kv_ignore_args) -> tuple[dict, dict, dict]:
         '''
         Run the full annotation pipeline.
 
@@ -121,7 +121,7 @@ class Xener:
             multihomolo: Whether to allow multiple homologs per gene.
             homolo_weight_key: BLAST result column used as homology weight.
             save: Whether to save intermediate results to outdir.
-            **kv_blastp_args: Extra arguments passed to blastp.
+            **kv_ignore_args: Ignored parameters.
 
         Returns:
             cluster2celltype: Mapping from cluster to predicted cell type.
@@ -133,16 +133,76 @@ class Xener:
 
         debug_params = dict()
 
+        # Resolve defaults before cache checks so checkpoint validation
+        # and the actual computation use consistent values
+        if top_num is None:
+            top_num = self._default_config['top_num']
+
+        # --- Check cached results from last step backwards ---
+        # Determine the first pipeline step that needs to be (re)computed.
+        # resume_step: 0=marker_gene, 1=marker_weight, 2=mapping, 3=topk_markers, 4=all cached
+        resume_step = 0
+
         marker_gene_path = outdir / 'marker_gene.zip'
-        marker_gene_loaded = False
-        if marker_gene_path.exists():
+        marker_weight_path = outdir / 'marker_weight.zip'
+        gene_homolo_weight_path = outdir / 'gene_homolo_weight.zip'
+        topk_markers_path = outdir / 'topk_markers.zip'
+
+        # topk_markers (step 4)
+        if topk_markers_path.exists():
             try:
-                marker_gene = pd.read_csv(marker_gene_path, sep=None, engine='python', header=0)
-                marker_gene_loaded = True
-                logger.info('marker_gene loaded from %s', marker_gene_path)
+                topk_markers = pd.read_csv(topk_markers_path, sep=None, engine='python', header=0)
+                gene_count = topk_markers[['group', 'gene']].drop_duplicates()
+                expected = len(gene_count['group'].unique()) * top_num
+                if gene_count.shape[0] == expected:
+                    resume_step = 4
+                    logger.info('Checkpoint loaded: %s', topk_markers_path)
+                else:
+                    logger.warning('Checkpoint invalid (expected %s gene-group combos, got %s): %s',
+                                   expected, gene_count.shape[0], topk_markers_path)
             except Exception as e:
-                logger.error('marker_gene.zip is corrupted!')
-        if not marker_gene_loaded:
+                logger.error('Checkpoint corrupted: %s', topk_markers_path)
+        else:
+            logger.info('Checkpoint not found: %s', topk_markers_path)
+
+        # gene_homolo_weight (step 3)
+        if resume_step < 4:
+            if gene_homolo_weight_path.exists():
+                try:
+                    gene_homolo_weight = pd.read_csv(gene_homolo_weight_path, sep=None, engine='python', header=0)
+                    resume_step = 3
+                    logger.info('Checkpoint loaded: %s', gene_homolo_weight_path)
+                except Exception as e:
+                    logger.error('Checkpoint corrupted: %s', gene_homolo_weight_path)
+            else:
+                logger.info('Checkpoint not found: %s', gene_homolo_weight_path)
+
+        # marker_weight (step 2)
+        if resume_step < 3:
+            if marker_weight_path.exists():
+                try:
+                    marker_weight = pd.read_csv(marker_weight_path, sep=None, engine='python', header=0)
+                    resume_step = 2
+                    logger.info('Checkpoint loaded: %s', marker_weight_path)
+                except Exception as e:
+                    logger.error('Checkpoint corrupted: %s', marker_weight_path)
+            else:
+                logger.info('Checkpoint not found: %s', marker_weight_path)
+
+        # marker_gene (step 1)
+        if resume_step < 2:
+            if marker_gene_path.exists():
+                try:
+                    marker_gene = pd.read_csv(marker_gene_path, sep=None, engine='python', header=0)
+                    resume_step = 1
+                    logger.info('Checkpoint loaded: %s', marker_gene_path)
+                except Exception as e:
+                    logger.error('Checkpoint corrupted: %s', marker_gene_path)
+            else:
+                logger.info('Checkpoint not found: %s', marker_gene_path)
+
+        # --- Compute/resume pipeline steps ---
+        if resume_step <= 0:
             logger.info('generating marker_gene ...')
             adata = read_h5ad(non_model_h5ad)
             logger.info('adata: %s', adata)
@@ -152,16 +212,7 @@ class Xener:
                 logger.info('marker_gene saved to %s', marker_gene_path)
             logger.info('marker_gene.shape: %s', marker_gene.shape)
 
-        marker_weight_path = outdir / 'marker_weight.zip'
-        marker_weight_loaded = False
-        if marker_weight_path.exists():
-            try:
-                marker_weight = pd.read_csv(marker_weight_path, sep=None, engine='python', header=0)
-                marker_weight_loaded = True
-                logger.info('marker_weight loaded from %s', marker_weight_path)
-            except Exception as e:
-                logger.error('marker_weight.zip is corrupted!')
-        if not marker_weight_loaded:
+        if resume_step <= 1:
             logger.info('generating marker_weight ...')
             marker_weight, debug_gene_weight = self.get_gene_weight(marker_gene, marker_weight_method)
             debug_params['get_gene_weight'] = debug_gene_weight
@@ -170,37 +221,17 @@ class Xener:
                 logger.info('marker_weight saved to %s', marker_weight_path)
             logger.info('marker_weight.shape: %s', marker_weight.shape)
 
-        gene_homolo_weight_path = outdir / 'gene_homolo_weight.zip'
-        gene_homolo_weight_loaded = False
-        if gene_homolo_weight_path.exists():
-            try:
-                gene_homolo_weight = pd.read_csv(gene_homolo_weight_path, sep=None, engine='python', header=0)
-                gene_homolo_weight_loaded = True
-                logger.info('gene_homolo_weight loaded from %s', gene_homolo_weight_path)
-            except Exception as e:
-                logger.error('gene_homolo_weight.zip is corrupted!')
-        if not gene_homolo_weight_loaded:
+        if resume_step <= 2:
             logger.info('generating gene_homolo_weight ...')
             gene_homolo_weight, debug_mapping = self.mapping(marker_weight, non_model_fasta, model_species, outdir,
-                                              homolo_weight_key, mapping_strict, **kv_blastp_args)
+                                              homolo_weight_key, mapping_strict)
             debug_params['mapping'] = debug_mapping
             if save:
                 gene_homolo_weight.to_csv(gene_homolo_weight_path, index=False)
                 logger.info('gene_homolo_weight saved to %s', gene_homolo_weight_path)
             logger.info('gene_homolo_weight.shape: %s', gene_homolo_weight.shape)
 
-        topk_markers_path = outdir / 'topk_markers.zip'
-        topk_markers_loaded = False
-        if topk_markers_path.exists():
-            try:
-                topk_markers = pd.read_csv(topk_markers_path, sep=None, engine='python', header=0)
-                gene_count = topk_markers[['group', 'gene']].drop_duplicates()
-                if gene_count.shape[0] == len(gene_count['group'].unique()) * top_num:
-                    topk_markers_loaded = True
-                    logger.info('topk_markers loaded from %s', topk_markers_path)
-            except Exception as e:
-                logger.error('topk_markers.zip is corrupted!')
-        if not topk_markers_loaded:
+        if resume_step <= 3:
             logger.info('generating topk_markers ...')
             topk_markers, debug_topk = self.get_topk_gene(gene_homolo_weight, top_num, multihomolo)
             debug_params['get_topk_gene'] = debug_topk
@@ -209,6 +240,7 @@ class Xener:
                 logger.info('topk_markers saved to %s', topk_markers_path)
             logger.info('topk_markers.shape: %s', topk_markers.shape)
 
+        # --- cell_annotation (always runs) ---
         annotation_info_path = outdir / 'annotation'
         cluster2celltype, cluster2max_initweight_celltype, celltype_weight, debug_annotation = self.cell_annotation(
             topk_markers, annotation_info_path, organ, threshold,
@@ -393,7 +425,7 @@ class Xener:
                 logger.info('run blastp for %s', species)
                 # Align only the extracted genes
                 blastp_result.append(
-                    blastp(seq_file, self.blastdb[species], outdir / f'blastp_{species}.zip', num_threads, **kv_blastp_args)
+                    blastp(seq_file, self.blastdb[species], outdir / f'blastp_{species}.zip', num_threads)
                 )
         os.remove(seq_file)
         blast_result = pd.concat(blastp_result)
@@ -636,6 +668,10 @@ class Xener:
             filtered_nodes = [celltypes[idx] for idx in np.where(weight_array > threshold)[0].tolist()]
         else:
             filtered_nodes = celltypes
+
+        # Initialize to empty graph of matching type; overridden when aggregation is performed.
+        # Ensures sub_g_celltype2celltype is always bound for nx.compose at line ~779.
+        sub_g_celltype2celltype = sub_g_gene2celltype.__class__()
 
         if mode == 'node':
             if len(filtered_nodes) == 0:# No candidate type

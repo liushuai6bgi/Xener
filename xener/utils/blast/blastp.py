@@ -36,7 +36,7 @@ def blastp(query_fasta:Path, db_path:Path, output_file:Path, num_threads:int=Non
             output_file=tmp_output_file, num_threads=num_threads,
             other_args=' '.join([f"-{k} {v}" for k, v in kwargs.items()])
         )
-        logger.debug(f'BLASTP command: {cmd_blastp}')
+        logger.info(f'BLASTP command: {cmd_blastp}')
         result = subprocess.run(cmd_blastp, stderr=subprocess.PIPE, shell=True)
         if result.stderr:
             logger.error(f'BLASTP error: {result.stderr.decode()}')
