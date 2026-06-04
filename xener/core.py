@@ -56,14 +56,14 @@ class Xener:
         _ensure_data(DATA_KEY='default_run_conf.yaml')
         with open(_XENER_DATA_DIR / 'default_run_conf.yaml', 'r', encoding='utf-8') as f:
             self._default_config = yaml.load(f, Loader=yaml.FullLoader)
-        if blastdb_path is None:
+        if blastdb_path is None or not os.path.exists(blastdb_path):
             self.blastdb_path = _XENER_DATA_DIR / Path('blastdb/prot')
             if not self.blastdb_path.exists():
                 _ensure_data(DATA_KEY='blastdb.zip')
                 
         else:
             self.blastdb_path = Path(blastdb_path)
-            assert self.blastdb_path.exists(), f"blastdb_path does not exist! Please verify the provided parameters"
+            # assert self.blastdb_path.exists(), f"blastdb_path does not exist! Please verify the provided parameters"
         self.blastdb = get_blastdb(self.blastdb_path)
         self.blastp_result_path = blastp_result_path
         if kg_kwargs is None:
@@ -131,7 +131,11 @@ class Xener:
         outdir = Path(outdir)
         os.makedirs(outdir, exist_ok=True)
 
+        debug_params_path = outdir / 'debug_params.yaml'
         debug_params = dict()
+        if debug_params_path.exists():
+            with open(debug_params_path, 'r', encoding='utf-8') as f:
+                debug_params = yaml.load(f, Loader=yaml.FullLoader)
 
         # Resolve defaults before cache checks so checkpoint validation
         # and the actual computation use consistent values
@@ -206,7 +210,8 @@ class Xener:
             logger.info('generating marker_gene ...')
             adata = read_h5ad(non_model_h5ad)
             logger.info('adata: %s', adata)
-            marker_gene = self.get_markers(adata, cluster_key)
+            marker_gene, debug_markers = self.get_markers(adata, cluster_key)
+            debug_params['get_markers'] = debug_markers
             if save:
                 marker_gene.to_csv(marker_gene_path, index=False)
                 logger.info('marker_gene saved to %s', marker_gene_path)
@@ -252,14 +257,13 @@ class Xener:
             logger.info('celltype_weight saved to %s', celltype_weight_path)
         logger.info('celltype_weight.shape: %s', celltype_weight.shape)
 
-        debug_params_path = outdir / 'debug_params.yaml'
         with open(debug_params_path, 'w', encoding='utf-8') as f:
             yaml.dump(debug_params, f, default_flow_style=False)
         logger.info('debug_params saved to %s', debug_params_path)
 
         return cluster2celltype, cluster2max_initweight_celltype, debug_params
     
-    def get_markers(self, adata:sc.AnnData, cluster_key:str=None) -> pd.DataFrame:
+    def get_markers(self, adata:sc.AnnData, cluster_key:str=None) -> tuple[pd.DataFrame, dict]:
         '''
         Preprocess and analyze single-cell data, returning marker genes.
         Parameters:
@@ -268,6 +272,7 @@ class Xener:
             batch_key (str, optional): Batch key. Defaults to None; if provided, batch effect correction will be applied
         Returns:
             pd.DataFrame: Result of scanpy.get.rank_genes_groups_df
+            dict: Debug parameters
         '''
         logger.info(f'>>>getting markers cluster_key[{cluster_key}].')
         process(adata)
@@ -278,11 +283,12 @@ class Xener:
         if not use_raw and not issparse(adata.X):
             logger.error('Unavailable data! cann\'t find available counts.')
             raise Exception('Unavailable data! cann\'t find available counts.')
+        logger.info(f'use_raw[{use_raw}]')
 
         sc.tl.rank_genes_groups(adata, groupby=cluster_key, key_added = "rank_genes_groups", use_raw=use_raw, pts=True)
         # Get gene ranking table = number of clusters * number of genes
         markers = sc.get.rank_genes_groups_df(adata, group=None, key='rank_genes_groups')
-        return markers.drop(columns=['scores'])
+        return markers.drop(columns=['scores']), {'use_raw':use_raw}
         
     def get_gene_weight(self, markers:pd.DataFrame, marker_weight_method:Literal['prod','sum']=None) -> tuple[pd.DataFrame, dict]:
         marker_weight_method = self._default_config['marker_weight_method'] if marker_weight_method is None else marker_weight_method
