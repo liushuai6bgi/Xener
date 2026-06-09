@@ -188,6 +188,133 @@ geneCount, diffgeneCount, annotation, gene2celltype_g = annor.refine_single_clus
 # The results can be found in the returned annotation[key_added] DataFrame.
 ```
 
+## Log interpretation and debugging
+
+By default, xener logs at `INFO` level to the console with the format
+`[YYYY-MM-DD HH:MM:SS] [xener] [LEVEL] message`. For debugging or post-mortem
+analysis, redirect logs to a file and/or raise verbosity:
+
+```python
+from xener import Xener
+from xener.utils.logger import setup_logger, add_file_handler
+
+# File handler (unbuffered, appends by default, see xener/utils/logger.py).
+logger = setup_logger(level=20)  # 20 = logging.INFO
+add_file_handler(logger, log_file='xener.log', unbuffered=True)
+
+# Switch to DEBUG to also see raw KG HTTP status / bytes, BLASTP command,
+# build_graph_from_adjust_matrix internals, etc.
+logger.setLevel(10)  # 10 = logging.DEBUG
+```
+
+### Pipeline landmarks (top-level grep targets)
+
+The pipeline emits a small set of unambiguous markers you can `grep` to
+reconstruct what happened without reading the full log:
+
+| Grep target | Meaning |
+|---|---|
+| `>>>Xener pipeline started` | Entry of `__call__`. Tail is the resolved config (outdir, model_species, organ, top_num, mapping_strict, ann_strict). |
+| `Resuming from step` / `All 4 checkpoints present` / `No usable checkpoint` | Tells you whether this run re-used cached zip files or started from scratch. |
+| `>>>cell annotation` | Start of step 5; subsequent per-cluster logs are indented to its context. |
+| `>>>Xener pipeline finished in NNs` | End of `__call__`. Tail lists top-5 celltype frequencies. |
+| `KG get_gene2celltype_kg done in` / `KG get_celltype2celltype_kg done in` | Each KG round trip — slow network calls. |
+| `BLASTP done in` / `BLASTP cache hit` | Each `blastp` invocation (real run vs. cache). |
+| `>>>refine started` / `>>>refine finished` | Sub-cluster refinement span. |
+
+The elapsed time printed in the `finished` line is the wall-clock duration
+of the whole `__call__` (excluding Python import / setup).
+
+### Stage-by-stage debug recipes
+
+**1. `Xener.__init__` — environment problems**
+
+| Log line | What it means | What to do |
+|---|---|---|
+| `KG backend: bolt (url=...)` / `KG backend: http (url=...)` | Confirms which backend the client picked based on the URL scheme. | If you intended the other backend, fix `KG_url` in your config. |
+| `Bundled blastdb missing, downloading blastdb.zip...` | First-time setup is fetching the bundled database. | One-time; wait. If it hangs, check network / `xenor.dcs.cloud` reachability. |
+| `Provided blastdb_path ... does not exist, falling back to bundled database.` | Your `blastdb_path` was wrong, but xener kept going. | Verify the path; the run will still succeed but use the bundled DB. |
+| `KG species_organ_cell loaded: N unique organs` | KG round trip completed. | If 0, the KG is empty or unreachable — earlier lines will show a stack trace. |
+
+**2. `get_markers` — input data sanity**
+
+| Log line | What it means | What to do |
+|---|---|---|
+| `raw_available[True/False]` | Whether `adata.raw` is set. | Required for `use_raw=True` downstream. |
+| `use_raw[True/False]` | Whether `rank_genes_groups` ran on `.raw`. | If `False` and you expected `True`, your h5ad may have been saved without raw. |
+| `Unavailable data! cann't find available counts.` | Both `.X` and `.raw.X` are non-sparse. | Re-save the h5ad with raw counts (`sc.pp.log1p` after `normalize_total` won't work — you need raw counts in `.raw`). |
+| `highly_variable_genes[N]` | Triggered by `adata.shape[1] > 4000` (or `force_HVG=True`). | Informational; reduces gene count to `N`. |
+
+**3. `get_gene_weight` — numeric edge cases**
+
+| Log line | What it means | What to do |
+|---|---|---|
+| `replace_inf logfc: X` / `replace_zero pvals_adj: Y` | Real inf/zero values were clipped. | The chosen X/Y shows the magnitude; if X is huge your data has extreme fold-changes — review upstream DE. |
+| `logfc has inf values` / `pts_delta has inf values` / `-log10_pvals_adj has inf values` / `weight has inf values` | A residual inf slipped through after clipping. | Almost always a symptom of bad DE input (zero-variance clusters, all-zero pct1, etc.). |
+
+**4. `mapping` — BLASTP**
+
+| Log line | What it means | What to do |
+|---|---|---|
+| `BLASTP starting: query=..., db=..., threads=N` | New BLASTP run started. | Wait; the next `BLASTP done in` line will report wall time. |
+| `BLASTP failed with returncode=N` | BLASTP exited non-zero. | xener now raises `RuntimeError`; the message includes stderr. |
+| `BLASTP cache hit: ...zip (N rows, skipping alignment)` | Reused a previous BLASTP result. | If you expected a fresh run, delete `blastp_<species>.zip` or pass a different `outdir`. |
+| `BLASTP best-hits per (qseqid,sseqid): N rows` | Number of unique query-subject pairs after `idxmax` on bitscore. | Sanity check vs. your marker count — if dramatically lower, your pident/evalue/bitscore thresholds are too strict. |
+| `N groups merged to M groups in mapping` | Inner join on BLAST result dropped some marker rows → clusters have no BLAST hits. | Check your `non_model_fasta` actually contains the marker genes. |
+| `mapping_strict[N] is too loose!` / `multiple mapping detected!` | `mapping_strict` collapsed multi-copy families. | See "Strict modes" section. |
+
+**5. `cell_annotation` — per-cluster decisions**
+
+Each `cluster_X` logs:
+
+1. **KG query** — `KG get_gene2celltype_kg done in Ts: G genes, C celltypes, matrix=..., nnz=N`
+2. **Decay** — `total X% homolos of organ[O] not in kg` (likely the most common reason for low-quality annotations)
+3. **Branch** — one of:
+   - `single candidate "X" after threshold, returning directly`
+   - `top1 z-score>3 and top2<3, returning top1 "X" without aggregation`
+   - `ambiguous top types (top1 z=A, top2 z=B), running celltype2celltype aggregation with N candidates`
+   - `no candidate type after threshold, set to "unknown"`
+4. **Path mode only** — `path step N, current="X", M parent candidates, kept K (softmax>0.15)`
+5. **Save** — `gexf graph saved to .../cluster_X_gene2celltype.xml (nodes=N, edges=M)`
+
+If many clusters end up `unknown`:
+
+1. Check `total X% homolos of organ[O] not in kg` — if X is high (>30%), the KG doesn't have your species' homologs at all. Try a different `organ` or a different `model_species`.
+2. Check the threshold — `celltype` numbers after threshold tell you how aggressive the filter is.
+3. Inspect the saved `cluster_X_gene2celltype.xml` in Gephi to see which homolos connected to which celltypes.
+
+**6. `refine` / `refine_single_cluster` — sub-cluster debugging**
+
+| Log line | What it means | What to do |
+|---|---|---|
+| `>>>refine started: cluster_key=..., topk=..., organ=..., strict=..., key_added=...` | Effective refine parameters. | Cross-check against the values you passed in. |
+| `refine summary: N clusters queued for refinement, M skipped (single candidate).` | How many clusters actually entered `refine_single_cluster`. | If 0, your `celltypes_weight` is dominated by singletons or the top-`topk` types have no clear weight drop. |
+| `refine: skip cluster X (only 1 candidate celltype, need >=2 to refine).` | Cluster has only one candidate; nothing to disambiguate. | Informational. |
+| `refine: skip cluster X (no clear weight drop in top-5 celltypes, dominant type is unambiguous).` | Top celltype has no competitor within `topk`. | Increase `topk` or accept the dominant type. |
+| `>>>refine_single_cluster: cluster_id[X], cluster_key[Y], candidate_celltype[Z]` | Entry to single-cluster refinement. | If cluster_id is wrong, fix your `celltypes_weight` upstream. |
+| `refine_single_cluster effective params: moranI_threshold=..., strict=..., split_method=..., markergene_method=...` | Resolved values of all four refinement switches. | Double-check these — they drive the branch taken below. |
+| `strict=N: keep_max per column on KG matrix ...` | `strict>0` column-wise filtering active. | See "Strict modes" section. |
+| `markergene_method=...: N celltypes in queue, M unique markers` | Per-cluster queue size. | Empty queue ⇒ no annotation will happen. |
+| `note: bindiv mode will add temporary columns to adata.obs: f"{idx}_{type}_EXP", ...` | Heads-up that `adata.obs` is mutated. | If you don't want these columns, use `split_method='argmax'`. |
+| `argmax result distribution: [...]` | argmax branch — count of cells assigned to each celltype. | Concentrated in one type → confident. Spread → ambiguous. |
+| `refine_single_cluster X total: [...]` | Final unique labels in this cluster after refinement. | If all `waitting` or `unknown`, no cell passed the score threshold. |
+| `gene2celltype_g built: N nodes, M edges` | The returned NetworkX graph. | M=0 is suspicious — refinement produced no structure. |
+| `ValueError: refine_single_cluster: cluster_id[X] not in group_gene_homolo_weight groups. Available groups: [...]` | The cluster you're trying to refine has no `gene_homolo_weight` rows. | Pass the correct `cluster_id` (must exist in `group_gene_homolo_weight['group']`). |
+
+### Common patterns and quick fixes
+
+| Symptom | Grep this | Likely cause | Fix |
+|---|---|---|---|
+| Pipeline hangs after `BLASTP starting` | `BLASTP done` not seen | BLASTP is genuinely slow; or crashed silently. | Wait several minutes; if you see `BLASTP failed` you have a real error. Otherwise `kill -9` and reduce `top_num` for a smoke test. |
+| Many `KG get_gene2celltype_kg returned an empty matrix (organ=..., N homolos)` | as written | KG has no homolo→celltype edges for your `organ` filter. | Drop `organ` (set to `None`) or use a different organ; verify the gene names match species conventions. |
+| All `celltype=unknown` | `set to "unknown"` | Threshold too strict, or no candidates after graph propagation. | Inspect the gexf file; lower `threshold`; try `mode='node'` (less aggressive than `mode='path'`). |
+| `multiple mapping detected!` warnings | `multiple mapping` | Your `mapping_strict=1` is keeping ties across multi-copy families. | Set `mapping_strict=0` or check for duplicated gene entries upstream. |
+| `top1 z-score>3 and top2<3, returning top1` for every cluster | `returning top1` | KG graph propagation is not differentiating between clusters. | Verify the species-homolog overlap is non-trivial; check `gene_homolo_weight.shape` is not tiny. |
+| Refinement modifies `adata.obs` with `_EXP` columns | `will add temporary columns to adata.obs` | Expected behavior of `split_method='bindiv'`. | Use `split_method='argmax'` if you need a clean adata. |
+| `checkpoint invalid (expected N gene-group combos, got M)` | `Checkpoint invalid` | Your `top_num` changed since the last run, so the cached `topk_markers.zip` no longer matches. | Delete `topk_markers.zip` (and downstream) before re-running with new `top_num`. |
+| `KG HTTP <METHOD> <PATH> returned <CODE>` | `KG HTTP ... returned` | KG server is unhealthy or URL is wrong. | Retry; verify `KG_url`; check upstream KG health. |
+| Pipeline takes much longer than usual | `BLASTP done in` / `KG get_gene2celltype_kg done in` | One stage has slowed down. | Check the per-stage elapsed times — KG vs. BLASTP vs. `cell_annotation` pinpoint the bottleneck. |
+
 ## Claude Code / AI Agent Skill
 
 An agent skill definition is provided at [skill/xener/SKILL.md](skill/xener/SKILL.md) for use with Claude Code and compatible AI coding assistants. The skill guides the agent through the full xener workflow: installation → config validation → species/organ selection → pipeline execution → refinement suggestion.

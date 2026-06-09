@@ -1,4 +1,5 @@
 import sys
+import time
 import subprocess
 from typing import Literal
 from pathlib import Path
@@ -36,18 +37,30 @@ def blastp(query_fasta:Path, db_path:Path, output_file:Path, num_threads:int=Non
             output_file=tmp_output_file, num_threads=num_threads,
             other_args=' '.join([f"-{k} {v}" for k, v in kwargs.items()])
         )
-        logger.info(f'BLASTP command: {cmd_blastp}')
+        logger.info(f'BLASTP starting: query={query_fasta}, db={db_path}, threads={num_threads}')
+        logger.debug(f'BLASTP command: {cmd_blastp}')
+        t0 = time.time()
         result = subprocess.run(cmd_blastp, stderr=subprocess.PIPE, shell=True)
+        elapsed = time.time() - t0
+        if result.returncode != 0:
+            logger.error('BLASTP failed with returncode=%s after %.2fs: %s',
+                         result.returncode, elapsed,
+                         result.stderr.decode(errors='replace') if result.stderr else '(no stderr)')
+            raise RuntimeError(f'BLASTP failed (returncode={result.returncode})')
         if result.stderr:
-            logger.error(f'BLASTP error: {result.stderr.decode()}')
+            logger.warning('BLASTP stderr (returncode=0, %.2fs): %s', elapsed, result.stderr.decode(errors='replace'))
+        logger.info('BLASTP done in %.2fs: %s hits in %s', elapsed,
+                    sum(1 for _ in open(tmp_output_file)) - 1 if os.path.exists(tmp_output_file) else 0,
+                    tmp_output_file)
         blast_result = pd.read_csv(tmp_output_file, sep='\t', header=None)
         blast_result.columns = ['qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen', 'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
         blast_result = blast_result.loc[blast_result.groupby(['qseqid', 'sseqid'])['bitscore'].idxmax()]
+        logger.info('BLASTP best-hits per (qseqid,sseqid): %s rows', len(blast_result))
         os.remove(tmp_output_file)
         blast_result.to_csv(output_file, index=False)
     else:
         blast_result = pd.read_csv(output_file)
-        logger.info(f'{output_file} exists, loading from cache')
+        logger.info(f'BLASTP cache hit: {output_file} ({len(blast_result)} rows, skipping alignment)')
 
     return blast_result
 

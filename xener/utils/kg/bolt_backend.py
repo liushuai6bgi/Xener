@@ -1,9 +1,11 @@
 from typing import Literal
+import time
 import pandas as pd
 import scipy.sparse as sp
 
 from neo4j import GraphDatabase
 
+from ..logger import logger
 from .base import KGBackend
 
 
@@ -18,6 +20,7 @@ class KG_Neo4j_BoltBackend(KGBackend):
             url: Neo4j database address.
             auth: Neo4j database username and password.
         """
+        logger.info('KG_Neo4j_BoltBackend connecting to %s', url)
         self.driver = GraphDatabase.driver(url, auth=auth)
         
     def _build_cypher_gene2celltype_path(
@@ -104,10 +107,12 @@ class KG_Neo4j_BoltBackend(KGBackend):
         cypher = (
             'MATCH (a:Gene)-->(:Ontology{Name:"' + celltype + '"})' + " RETURN COUNT(a)"
         )
+        t0 = time.time()
         with self.driver.session() as session:
             results = session.run(cypher)
             data = results.value()[0]
-            return data
+        logger.info('KG get_genecount_kg(celltype=%s) -> %s in %.3fs', celltype, data, time.time() - t0)
+        return data
 
     def get_celltypecount_kg(self, gene: str) -> int:
         """
@@ -122,10 +127,12 @@ class KG_Neo4j_BoltBackend(KGBackend):
         cypher = (
             'MATCH (a:Gene{Name:"' + gene + '"})-->(:Ontology)' + " RETURN COUNT(a)"
         )
+        t0 = time.time()
         with self.driver.session() as session:
             results = session.run(cypher)
             data = results.value()[0]
-            return data
+        logger.info('KG get_celltypecount_kg(gene=%s) -> %s in %.3fs', gene, data, time.time() - t0)
+        return data
 
     def get_gene2celltype_kg(
         self,
@@ -149,9 +156,13 @@ class KG_Neo4j_BoltBackend(KGBackend):
         cypher = self._build_cypher_gene2celltype_path(
             organ, homolo_nodes, candidate_type
         )
+        logger.info('KG get_gene2celltype_kg request: %s homolos, organ=%s, %s candidate_types',
+                    len(homolo_nodes) if homolo_nodes else 0, organ,
+                    len(candidate_type) if candidate_type else 0)
         source_nodes = []
         target_nodes = []
         edges = []
+        t0 = time.time()
         with self.driver.session() as session:
             results = session.run(cypher)
             for result in results.graph().relationships:
@@ -165,6 +176,7 @@ class KG_Neo4j_BoltBackend(KGBackend):
                         result._properties["relation_confidence"],
                     )
                 )
+        cypher_elapsed = time.time() - t0
         # 构造邻接矩阵
         cellType_nodes = list(set(target_nodes))
         cellType2idx = {node: idx for idx, node in enumerate(cellType_nodes)}
@@ -176,7 +188,13 @@ class KG_Neo4j_BoltBackend(KGBackend):
         for source_node, target_node, v in edges:
             gene2celltype_matrix[gene2idx[source_node], cellType2idx[target_node]] = v
 
-        return gene_nodes, cellType_nodes, gene2celltype_matrix.tocsr()
+        csr = gene2celltype_matrix.tocsr()
+        logger.info('KG get_gene2celltype_kg done: cypher=%.2fs, %s genes, %s celltypes, %s edges, matrix=%s, nnz=%s',
+                    cypher_elapsed, len(gene_nodes), len(cellType_nodes), len(edges), csr.shape, csr.nnz)
+        if csr.nnz == 0:
+            logger.warning('KG get_gene2celltype_kg returned an empty matrix (organ=%s, %s homolos).',
+                           organ, len(homolo_nodes) if homolo_nodes else 0)
+        return gene_nodes, cellType_nodes, csr
 
     def get_celltype2celltype_kg(
         self, nodes: list[str], symmetric: bool = False, max_step: int = 1
@@ -200,6 +218,9 @@ class KG_Neo4j_BoltBackend(KGBackend):
         idx = 0
 
         cypher = self._build_cypher_celltype2celltype_path(nodes, max_step)
+        logger.info('KG get_celltype2celltype_kg request: %s nodes, symmetric=%s, max_step=%s',
+                    len(nodes), symmetric, max_step)
+        t0 = time.time()
         with self.driver.session() as session:
             results = session.run(cypher)
             for result in results.graph().relationships:
@@ -221,12 +242,15 @@ class KG_Neo4j_BoltBackend(KGBackend):
                     rows.append(new_nodes2idx[target_node])
                     cols.append(new_nodes2idx[source_node])
 
+        cypher_elapsed = time.time() - t0
         matrix = sp.coo_matrix(
             ([1] * len(rows), (rows, cols)), shape=(len(new_nodes), len(new_nodes))
         )
         matrix = matrix.tocsr()
         # 去除重复边
         matrix.data[matrix.data > 1] = 1
+        logger.info('KG get_celltype2celltype_kg done: cypher=%.2fs, %s nodes, %s edges, matrix=%s, nnz=%s',
+                    cypher_elapsed, len(new_nodes), len(rows), matrix.shape, matrix.nnz)
         return matrix, new_nodes
 
     def get_species_organ_cell(self) -> pd.DataFrame:
@@ -238,6 +262,8 @@ class KG_Neo4j_BoltBackend(KGBackend):
         """
         species_organ_cell = []
         cypher = "MATCH (a:Gene)-[b]->(c:Ontology) RETURN DISTINCT a.Species,c.Organ,c.Name"
+        logger.info('KG get_species_organ_cell ...')
+        t0 = time.time()
         with self.driver.session() as session:
             for species_name, organ_names, cell_name in session.run(cypher).values():
                 species_name = species_name.strip().replace(' ','_')
@@ -247,6 +273,10 @@ class KG_Neo4j_BoltBackend(KGBackend):
         species_organ_cell = pd.DataFrame(
             species_organ_cell, columns=["species", "organ", "cell"]
         ).drop_duplicates()
+        logger.info('KG get_species_organ_cell done in %.2fs: %s rows, %s species, %s organs',
+                    time.time() - t0, len(species_organ_cell),
+                    species_organ_cell['species'].nunique(),
+                    species_organ_cell['organ'].nunique())
         return species_organ_cell
 
     def close(self):

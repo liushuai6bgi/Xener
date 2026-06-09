@@ -1,6 +1,7 @@
 import os
 import time
 import psutil
+from collections import Counter
 from pathlib import Path
 from typing import Literal
 
@@ -53,22 +54,33 @@ class Xener:
             blastdb_path (str): Path to the existing BLAST database
             blastp_result_path (str): Path to BLASTP result files
         '''
+        logger.info('>>>Xener initializing...')
         _ensure_data(DATA_KEY='default_run_conf.yaml')
         with open(_XENER_DATA_DIR / 'default_run_conf.yaml', 'r', encoding='utf-8') as f:
             self._default_config = yaml.load(f, Loader=yaml.FullLoader)
         if blastdb_path is None or not os.path.exists(blastdb_path):
             self.blastdb_path = _XENER_DATA_DIR / Path('blastdb/prot')
+            if blastdb_path is not None and not os.path.exists(blastdb_path):
+                logger.warning('Provided blastdb_path %s does not exist, falling back to bundled database.', blastdb_path)
             if not self.blastdb_path.exists():
+                logger.info('Bundled blastdb missing, downloading blastdb.zip...')
                 _ensure_data(DATA_KEY='blastdb.zip')
-                
         else:
             self.blastdb_path = Path(blastdb_path)
             # assert self.blastdb_path.exists(), f"blastdb_path does not exist! Please verify the provided parameters"
+        logger.info('BLAST database directory: %s', self.blastdb_path)
         self.blastdb = get_blastdb(self.blastdb_path)
         self.blastp_result_path = blastp_result_path
+        if self.blastp_result_path:
+            logger.info('BLASTP result cache path: %s', self.blastp_result_path)
         if kg_kwargs is None:
             kg_kwargs = {'url': 'https://xenor.dcs.cloud'}
+            logger.info('KG kwargs not provided, using default url: %s', kg_kwargs['url'])
+        kg_url = kg_kwargs.get('url', 'https://xenor.dcs.cloud')
+        backend_type = 'http' if kg_url.startswith('http') else 'bolt'
+        logger.info('KG backend: %s (url=%s)', backend_type, kg_url)
         self.KG = KGClient(**kg_kwargs)
+        logger.info('KG species_organ_cell loaded: %s unique organs', len(self.KG.available_organ_set))
         logger.info('Xener initialized!')
 
     def run_from_yaml(self, yaml_file:str, save=True, configs:dict={}) -> tuple[dict, dict, dict]:
@@ -130,6 +142,9 @@ class Xener:
         '''
         outdir = Path(outdir)
         os.makedirs(outdir, exist_ok=True)
+        pipeline_t0 = time.time()
+        logger.info('>>>Xener pipeline started: outdir=%s, non_model_h5ad=%s, model_species=%s, organ=%s, top_num=%s, mapping_strict=%s, ann_strict=%s',
+                    outdir, non_model_h5ad, model_species, organ, top_num, mapping_strict, ann_strict)
 
         debug_params_path = outdir / 'debug_params.yaml'
         debug_params = dict()
@@ -206,6 +221,13 @@ class Xener:
                 logger.info('Checkpoint not found: %s', marker_gene_path)
 
         # --- Compute/resume pipeline steps ---
+        if resume_step == 4:
+            logger.info('All 4 checkpoints present, skipping marker/weight/mapping/topk steps. Only cell_annotation will run.')
+        elif resume_step > 0:
+            logger.info('Resuming from step %s (steps 0..%s loaded from checkpoints).', resume_step, resume_step - 1)
+        else:
+            logger.info('No usable checkpoint, running the full pipeline from scratch.')
+
         if resume_step <= 0:
             logger.info('generating marker_gene ...')
             adata = read_h5ad(non_model_h5ad)
@@ -260,6 +282,14 @@ class Xener:
         with open(debug_params_path, 'w', encoding='utf-8') as f:
             yaml.dump(debug_params, f, default_flow_style=False)
         logger.info('debug_params saved to %s', debug_params_path)
+
+        # --- Pipeline summary ---
+        elapsed = time.time() - pipeline_t0
+        n_clusters = len(cluster2celltype)
+        celltype_counter = Counter(cluster2celltype.values())
+        top_celltypes = celltype_counter.most_common(5)
+        logger.info('>>>Xener pipeline finished in %.2fs: %s clusters annotated, top celltypes=%s',
+                    elapsed, n_clusters, top_celltypes)
 
         return cluster2celltype, cluster2max_initweight_celltype, debug_params
     
@@ -505,7 +535,14 @@ class Xener:
             if checked_organ is None:
                 logger.warning('organ %s is unavailable, set to None.', organ)
             organ = checked_organ
-            
+
+        n_clusters = blast_result['group'].nunique()
+        logger.info('cell_annotation: %s clusters to annotate, input blast_result has %s (group,gene,homolo) rows.',
+                    n_clusters, len(blast_result))
+        if n_clusters == 0:
+            logger.warning('cell_annotation: no clusters found in blast_result, returning empty mapping.')
+            return {}, {}, pd.DataFrame(columns=['cluster', 'celltype', 'weight', 'init_weight']), debug_params
+
         # Lists to save all celltype weights for each cluster, these three lists should have equal length
         cluster_list, celltype_list, weight_list, init_weight_list = [], [], [], []
 
@@ -562,13 +599,16 @@ class Xener:
         if ann_strict < 0:
             logger.warning(f'ann_strict[{ann_strict}] is too loose!')
             homolo2celltype_matrix = (homolo2celltype_matrix != 0).astype(int)
+            logger.info('ann_strict<0: KG matrix binarized to 0/1 (every non-zero edge gets weight 1).')
         elif ann_strict > 0:
             if ann_strict == 1 and homolo2celltype_matrix.shape[1] > 1:
                 # keep the max confidence path per marker
-                print('homolo_nodes', homolo_nodes, homolo2celltype_matrix.shape, celltype_nodes)
+                logger.info('ann_strict=1: keep_max per row on KG matrix %s, %s celltypes, %s homolos',
+                            homolo2celltype_matrix.shape, len(celltype_nodes), len(homolo_nodes))
                 homolo2celltype_matrix = utils.keep_max(homolo2celltype_matrix, axis=1)
             elif ann_strict == 2 and sum(homolo2celltype_matrix.shape) > 2:
                 # keep the max confidence path in matrix
+                logger.info('ann_strict=2: keep_max globally on KG matrix %s', homolo2celltype_matrix.shape)
                 homolo2celltype_matrix = utils.keep_max(homolo2celltype_matrix, axis=-1)
             else:
                 logger.warning('ann_strict %s is not supported for shape[%s], skip.', ann_strict, homolo2celltype_matrix.shape)
@@ -675,6 +715,8 @@ class Xener:
             filtered_nodes = [celltypes[idx] for idx in np.where(weight_array > threshold)[0].tolist()]
         else:
             filtered_nodes = celltypes
+        logger.info('%s: %s celltypes before threshold, %s after threshold=%s',
+                    output_prefix, len(celltypes), len(filtered_nodes), threshold)
 
         # Initialize to empty graph of matching type; overridden when aggregation is performed.
         # Ensures sub_g_celltype2celltype is always bound for nx.compose at line ~779.
@@ -683,11 +725,16 @@ class Xener:
         if mode == 'node':
             if len(filtered_nodes) == 0:# No candidate type
                 celltype = 'unknown'
+                logger.warning('%s: no candidate type after threshold, set to "unknown".', output_prefix)
             elif len(filtered_nodes) == 1:# Only one candidate type, return directly
                 celltype = filtered_nodes[0]
+                logger.info('%s: single candidate "%s" after threshold, returning directly.', output_prefix, celltype)
             elif weight_array[0] > 3 and weight_array[1] < 3: # Dominance is too obvious, return directly
                 celltype = filtered_nodes[0]
+                logger.info('%s: top1 z-score>3 and top2<3, returning top1 "%s" without aggregation.', output_prefix, celltype)
             else:# Dominance is not obvious, perform aggregation
+                logger.info('%s: ambiguous top types (top1 z=%s, top2 z=%s), running celltype2celltype aggregation with %s candidates.',
+                            output_prefix, round(weight_array[0], 2), round(weight_array[1], 2), len(filtered_nodes))
                 celltype2celltype_matrix, new_celltypes = self.KG.get_celltype2celltype_kg(filtered_nodes)
 
                 # Set edges corresponding to unselected nodes to negative
@@ -705,6 +752,7 @@ class Xener:
                     node_attr, node_attr,mode='n')
                 if sub_g_celltype2celltype.number_of_edges() == 0: # These celltypes have no connection, return the result with maximum weight
                     celltype = filtered_nodes[0]
+                    logger.info('%s: no edges in celltype2celltype subgraph, falling back to top1 "%s".', output_prefix, celltype)
                 else: # Has connection
                     # Add weights
                     for node in sub_g_celltype2celltype.nodes:
@@ -720,8 +768,10 @@ class Xener:
                     weight_distribution = {node: sub_g_celltype2celltype.nodes[node] for node in sub_g_celltype2celltype.nodes}
                     sorted_nodes = sorted(weight_distribution.items(), key=lambda item: item[1]['weight'], reverse=True)
                     celltype = sorted_nodes[0][0]
+                    logger.info('%s: aggregation done, winner="%s" (top3=%s).', output_prefix, celltype, [n for n, _ in sorted_nodes[:3]])
             max_initweight_celltype = celltype
         elif mode == 'path':
+            logger.info('%s: path-mode annotation, %s celltypes in initial set.', output_prefix, len(celltypes))
             # Direct aggregation
             celltype2celltype_matrix, new_celltypes = self.KG.get_celltype2celltype_kg(celltypes)
             # Supplement celltypes that did not appear in edges
@@ -756,8 +806,11 @@ class Xener:
             sorted_nodes = sorted(weight_distribution.items(), key=lambda item: item[1]['weight'], reverse=True)
             celltype = [sorted_nodes[0][0]]
             max_initweight_celltype = [weight[celltypes.index(celltype[-1])], sorted_nodes[0][0]]
+            logger.info('%s: path-mode starting at "%s", exploring ancestors...', output_prefix, celltype[-1])
             # Find significant path
+            path_step = 0
             while sub_g_celltype2celltype.in_degree(celltype[-1]) > 0:
+                path_step += 1
                 # Get all parent nodes
                 parents = [node for node in sub_g_celltype2celltype.predecessors(celltype[-1])]
                 # Get weights of all parent nodes
@@ -766,6 +819,8 @@ class Xener:
                 # parent_index = np.argmax(weight_array)
                 # celltype.append(parents[parent_index])
                 indices = np.where(weight_array > 0.15)[0].tolist()
+                logger.info('%s: path step %s, current="%s", %s parent candidates, kept %s (softmax>0.15).',
+                            output_prefix, path_step, celltype[-1], len(parents), len(indices))
                 if len(indices) == 1: # Only one candidate parent node
                     celltype.append(parents[indices[0]])
                     if weight[celltypes.index(celltype[-1])] > max_initweight_celltype[0]: # Parent node's initial weight is greater than max initial weight
@@ -778,9 +833,13 @@ class Xener:
                     maxindex = np.argmax(init_weights)
                     if init_weights[maxindex] > max_initweight_celltype[0]: # Parent node's initial weight is greater than max initial weight
                         max_initweight_celltype = [init_weights[maxindex], multiple_parents[maxindex]]
+                    logger.info('%s: path forks at "%s" with %s branches, stopping further exploration.',
+                                output_prefix, celltype[-2], len(multiple_parents))
                     break
             celltype = '>'.join(celltype)
             max_initweight_celltype = max_initweight_celltype[1]
+            logger.info('%s: path-mode final celltype path: "%s" (length=%s, max_initweight=%s).',
+                        output_prefix, celltype, len(celltype.split('>')), max_initweight_celltype)
 
 
         celltype_list = [node[0] for node in sorted_nodes]
@@ -798,7 +857,12 @@ class Xener:
                     graph_gene2celltypes.nodes[node]['recorder'][key] = float(graph_gene2celltypes.nodes[node]['recorder'][key])
         if not signal4recorder: # No recorder
             logger.warning('No recorder in graph_gene2celltype')
-        nx.write_gexf(graph_gene2celltypes, outdir / f'{output_prefix}_gene2celltype.xml')
+        gexf_path = outdir / f'{output_prefix}_gene2celltype.xml'
+        nx.write_gexf(graph_gene2celltypes, gexf_path)
+        logger.info('%s: gexf graph saved to %s (nodes=%s, edges=%s)',
+                    output_prefix, gexf_path, graph_gene2celltypes.number_of_nodes(), graph_gene2celltypes.number_of_edges())
+        logger.info('%s: annotation result celltype=%s, max_initweight=%s, n_candidates=%s',
+                    output_prefix, celltype, max_initweight_celltype, len(celltype_list))
         return celltype, max_initweight_celltype, celltype_list, weight_list, initial_weight_list
 
     def refine(self, adata:sc.AnnData, group_gene_homolo_weight:pd.DataFrame,
@@ -812,12 +876,19 @@ class Xener:
             celltypes_weight (pd.DataFrame): Each cluster's celltypes and their corresponding weights
             key_added (str): New celltype column name
         '''
+        logger.info('>>>refine started: cluster_key=%s, topk=%s, organ=%s, strict=%s, key_added=%s',
+                    cluster_key, topk, organ, strict, key_added)
         data_need_refine = []
         # Convert weights to normal distribution
         celltypes_weight.sort_values(by=['cluster', 'init_weight'], ascending=[True, False], inplace=True)
+        skipped_singleton = 0
         for cluster in celltypes_weight['cluster'].unique():
             init_weight = celltypes_weight[celltypes_weight['cluster']==cluster]
-            if init_weight.shape[0] < 2: continue
+            if init_weight.shape[0] < 2:
+                skipped_singleton += 1
+                logger.info('refine: skip cluster %s (only %s candidate celltype, need >=2 to refine).',
+                            cluster, init_weight.shape[0])
+                continue
             diff = np.diff(init_weight['init_weight'])
             max_change_idx = np.argmax(abs(diff))
             index = min(max_change_idx, topk)
@@ -825,11 +896,24 @@ class Xener:
                 data_need_refine.append([
                     cluster, init_weight['celltype'][:index+1].tolist()
                 ])
+            else:
+                logger.info('refine: skip cluster %s (no clear weight drop in top-%s celltypes, dominant type is unambiguous).',
+                            cluster, topk)
+
+        logger.info('refine summary: %s clusters queued for refinement, %s skipped (single candidate).',
+                    len(data_need_refine), skipped_singleton)
+        if data_need_refine:
+            logger.info('refine candidates: %s',
+                        [(c, len(ct)) for c, ct in data_need_refine])
 
         # Annotate each cluster
-        for key, celltypes in data_need_refine:
+        for idx, (key, celltypes) in enumerate(data_need_refine, 1):
+            logger.info('refine: %s/%s cluster %s with %s candidates',
+                        idx, len(data_need_refine), key, celltypes)
             self.refine_single_cluster(adata, group_gene_homolo_weight, cluster_key, key,
                                         celltypes, key_added, organ=organ, strict=strict)
+        logger.info('>>>refine finished: %s clusters refined, result column=%s',
+                    len(data_need_refine), key_added)
 
     @staticmethod
     def filt_marker_by_moranI(adata:sc.AnnData, moranI_threshold:float=0.5) -> list[str]:
@@ -879,6 +963,9 @@ class Xener:
             Adds a new column to adata.obs named key_added.
         '''
         logger.info('>>>refine_single_cluster: cluster_id[%s], cluster_key[%s], candidate_celltype[%s]', cluster_id, cluster_key, candidate_celltype)
+        logger.info('refine_single_cluster effective params: moranI_threshold=%s, strict=%s, split_method=%s, markergene_method=%s, celltype_geneCount_gene=%s',
+                    moranI_threshold, strict, split_method, markergene_method,
+                    'provided' if celltype_geneCount_gene is not None else 'None (will compute from KG)')
         if 'pca' not in adata.uns.keys():
             logger.info('run sc.pp.pca(adata)')
             sc.pp.pca(adata)
@@ -897,8 +984,10 @@ class Xener:
             group_gene_homolo_weight['group'] = group_gene_homolo_weight['group'].astype(str)
             logger.info('group_gene_homolo_weight[group] in str: %s', group_gene_homolo_weight['group'].unique())
             if str(cluster_id) not in group_gene_homolo_weight['group'].unique():
-                logger.warning(f'No homolo2gene mapping, check your cluster_id[{cluster_id}].')
-                return
+                available = sorted(group_gene_homolo_weight['group'].unique().tolist())
+                raise ValueError(
+                    f'refine_single_cluster: cluster_id[{cluster_id}] not in group_gene_homolo_weight groups. '
+                    f'Available groups: {available}.')
             group_gene_homolo_weight = group_gene_homolo_weight[group_gene_homolo_weight['group'] == str(cluster_id)]
             gene_cnt_homolo = group_gene_homolo_weight['gene'].unique().shape[0]
             gene_cnt_adata = adata.shape[1]
@@ -921,12 +1010,14 @@ class Xener:
                 candidate_type=candidate_celltype)
             
             if strict > 0:
+                logger.info('strict=%s: keep_max per column on KG matrix (shape %s)', strict, matrix.shape)
                 matrix = utils.keep_max(matrix, axis=0)
                 matrix, removed_rows, removed_cols = utils.remove_zeros(matrix)
                 for i in sorted(removed_cols, reverse=True):
                     del source[i]
                 for i in sorted(removed_rows, reverse=True):
                     del target[i]
+                logger.info('strict pruning done: %s celltypes and %s homolos removed', len(removed_cols), len(removed_rows))
             
             sub_g_homolo2celltype = utils.build_graph_from_adjust_matrix(
                 matrix > 0,
@@ -1012,6 +1103,9 @@ class Xener:
         elif markergene_method == 'all':
             celltype_geneCount_gene4reine = celltype_geneCount_gene.copy()
             gene_set4refine = all_gene_set.copy()
+        logger.info('markergene_method=%s: %s celltypes in queue, %s unique markers',
+                    markergene_method, len(celltype_geneCount_gene4reine), len(gene_set4refine))
+        logger.info('note: bindiv mode will add temporary columns to adata.obs: f"{idx}_{type}_EXP", f"{idx}_!{type}_EXP", f"{idx}_diff_EXP"')
 
         # Start refinement
         if split_method == 'bindiv':
@@ -1056,12 +1150,16 @@ class Xener:
             connectivities = adata_sub.obsp['connectivities']
             connectivities_sum = connectivities.sum(axis=1)
             if len(exps.shape) > 2:
-                exps = np.squeeze(exps, axis=-1) 
+                exps = np.squeeze(exps, axis=-1)
             exps = connectivities / connectivities_sum @ exps.T
             type_id = np.argmax(exps, axis=1, keepdims=False)
             type_id = np.squeeze(type_id)
             adata_sub.obs[key_added] = [celltype_geneCount_gene4reine[i][0] for i in type_id]
+            logger.info('argmax: scored %s celltypes across %s cells', exps.shape[1], exps.shape[0])
+            argmax_counter = Counter(adata_sub.obs[key_added].tolist())
+            logger.info('argmax result distribution: %s', argmax_counter.most_common())
 
         logger.info('refine_single_cluster %s total: %s', cluster_id, adata_sub.obs[key_added].unique().tolist())
         gene2celltype_g = nx.compose_all([sub_g_gene2homolo, sub_g_homolo2celltype])
+        logger.info('gene2celltype_g built: %s nodes, %s edges', gene2celltype_g.number_of_nodes(), gene2celltype_g.number_of_edges())
         return celltype_geneCount_gene, celltype_diffgeneCount_gene, adata_sub.obs[[key_added]], gene2celltype_g
