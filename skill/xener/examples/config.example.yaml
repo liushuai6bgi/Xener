@@ -1,0 +1,23 @@
+# Example config.yaml for the Xener pipeline.
+# Copy this to your working directory and edit the values.
+
+# Required fields
+cluster_key: leiden
+model_species:
+  - Brassica_rapa
+non_model_fasta: Arabidopsis_thaliana.fasta
+non_model_h5ad: ERP132245.h5ad
+organ: leaf
+outdir: output/ERP132245
+
+# Optional fields (defaults shown; uncomment to override)
+# marker_weight_method: prod          # prod | sum
+# top_num: 30                         # Top N genes per cluster
+# homolo_weight_key: pident           # pident | evalue | bitscore
+# multihomolo: true                   # Keep multiple homologs per gene
+# decay_factor: 0.7                   # Weight decay for graph propagation
+# mode: path                          # node | path
+# threshold: null                     # Z-score threshold for filtering
+# candidate_annotation:               # Restrict cell types (optional)
+#   - type1
+#   - type2

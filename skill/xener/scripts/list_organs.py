@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""List available organs from the knowledge graph."""
+"""List available organs from the knowledge graph.
+
+CLI wrapper used by the Xener agent skill. Prints the valid `organ` values
+that can be used in config.yaml (optionally filtered by --species).
+
+Skill context: invoked during references/workflows/config-validation.md to
+verify a user-supplied `organ` value before pipeline execution. Output must
+be presented to the user for explicit confirmation.
+"""
 
 import argparse
 from xener import Xener

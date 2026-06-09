@@ -279,10 +279,11 @@ class Xener:
         if adata.obs[cluster_key].dtype != 'str':
             adata.obs[cluster_key] = adata.obs[cluster_key].astype('str')
         raw_available = hasattr(adata, 'raw') and adata.raw is not None
+        logger.info(f'raw_available[{raw_available}]')
         use_raw = raw_available and issparse(adata.raw.X)
         if not use_raw and not issparse(adata.X):
             logger.error('Unavailable data! cann\'t find available counts.')
-            raise Exception('Unavailable data! cann\'t find available counts.')
+            # raise Exception('Unavailable data! cann\'t find available counts.')
         logger.info(f'use_raw[{use_raw}]')
 
         sc.tl.rank_genes_groups(adata, groupby=cluster_key, key_added = "rank_genes_groups", use_raw=use_raw, pts=True)
@@ -854,7 +855,7 @@ class Xener:
             cluster_key:str, cluster_id:str, candidate_celltype:list[str], 
             key_added:str, organ:str=None, moranI_threshold=0.5, strict:int=0,
             split_method:Literal['bindiv','argmax']='bindiv', 
-            markergene_method:Literal['diff','all']='diff', celltype_geneCount_gene=None):
+            markergene_method:Literal['diff','all']='diff', celltype_geneCount_gene=None) -> tuple[list, list, pd.DataFrame, nx.Graph]:
         '''
         Annotate a single cluster.
         Parameters:
@@ -873,6 +874,7 @@ class Xener:
             celltype_geneCount_gene: List of (celltype, gene_count, gene_list) tuples.
             celltype_diffgeneCount_gene: List of (celltype, diff_gene_count, diff_gene_list) tuples.
             annotation: DataFrame with the refined annotation column.
+            gene2celltype_g: NetworkX graph object, from gene to celltype.
         Side effects:
             Adds a new column to adata.obs named key_added.
         '''
@@ -898,7 +900,20 @@ class Xener:
                 logger.warning(f'No homolo2gene mapping, check your cluster_id[{cluster_id}].')
                 return
             group_gene_homolo_weight = group_gene_homolo_weight[group_gene_homolo_weight['group'] == str(cluster_id)]
+            gene_cnt_homolo = group_gene_homolo_weight['gene'].unique().shape[0]
+            gene_cnt_adata = adata.shape[1]
+            share_gene = set(group_gene_homolo_weight['gene']) & set(adata.var_names)
+            # if len(share_gene) < len(group_gene_homolo_weight['gene'].unique()):
+            logger.warning(f'{len(share_gene)} genes are shared between group_gene_homolo_weight[{gene_cnt_homolo}] and adata.var_names[{gene_cnt_adata}].')
+            
+            group_gene_homolo_weight = group_gene_homolo_weight[group_gene_homolo_weight['gene'].isin(share_gene)]
+
             group_gene_homolo_weight.apply(lambda x: homolo2gene.update({x['homolo']: x['gene']}), axis=1)
+            sub_g_gene2homolo = nx.Graph()
+            for homolo, gene in homolo2gene.items():
+                sub_g_gene2homolo.add_node('homolo_'+homolo, {'name':homolo,'weight':0,'type':'homolo'})
+                sub_g_gene2homolo.add_node('gene_'+gene, {'name':gene,'weight':0,'type':'gene'})
+                sub_g_gene2homolo.add_edge('gene'+gene, 'homolo_'+homolo)
             # Look up marker genes in knowledge graph for each cell type
             source, target, matrix = self.KG.get_gene2celltype_kg(
                 homolo_nodes=list(homolo2gene.keys()),
@@ -913,6 +928,16 @@ class Xener:
                 for i in sorted(removed_rows, reverse=True):
                     del target[i]
             
+            sub_g_homolo2celltype = utils.build_graph_from_adjust_matrix(
+                matrix > 0,
+                ['homolo_'+i for i in source],
+                target,
+                'relation_confidence',
+                source_attr=[{'name':i,'weight':0,'type':'homolo'} for i in source],
+                target_attr=[{'name':i,'weight':0,'type':'celltype'} for i in target],
+                mode='n'
+            )
+
             celltype2markers = dict()
             X_coo = matrix.tocoo()
             for i, j, v in zip(X_coo.row, X_coo.col, X_coo.data):
@@ -1030,11 +1055,13 @@ class Xener:
             exps = np.array(exps)
             connectivities = adata_sub.obsp['connectivities']
             connectivities_sum = connectivities.sum(axis=1)
+            if len(exps.shape) > 2:
+                exps = np.squeeze(exps, axis=-1) 
             exps = connectivities / connectivities_sum @ exps.T
             type_id = np.argmax(exps, axis=1, keepdims=False)
             type_id = np.squeeze(type_id)
             adata_sub.obs[key_added] = [celltype_geneCount_gene4reine[i][0] for i in type_id]
 
         logger.info('refine_single_cluster %s total: %s', cluster_id, adata_sub.obs[key_added].unique().tolist())
-        
-        return celltype_geneCount_gene, celltype_diffgeneCount_gene, adata_sub.obs[[key_added]]
+        gene2celltype_g = nx.compose_all([sub_g_gene2homolo, sub_g_homolo2celltype])
+        return celltype_geneCount_gene, celltype_diffgeneCount_gene, adata_sub.obs[[key_added]], gene2celltype_g

@@ -168,13 +168,23 @@ candidate_celltype = ['type1', 'type2']
 # Only support the values that appear in celltype_weight[celltype_weight['cluster'] == cluster_id]['celltype'].unique()
 key_added = 'xener_refine'
 moranI_threshold = 0.5
-# moranI_threshold used for gene screening, the effective value ranges from [-1, 1].
-# The closer to 1, the stricter it is. If an invalid value is input, the screening step will be skipped.
+# moranI_threshold: Moran's I filtering threshold in [-1, 1]. The closer to 1, the stricter it is.
+# Values outside [-1, 1] skip the screening step.
+strict = 0                 # strict>0: keep only the max-confidence cell type per gene (column-wise)
+split_method = 'bindiv'    # 'bindiv' = binary division, 'argmax' = argmax over cell-type scores
+markergene_method = 'diff' # 'diff' = use only differential markers, 'all' = use all markers
+# celltype_geneCount_gene: optional precomputed (celltype, gene_count, gene_list) list.
+# If None, it is computed from the knowledge graph.
 
-geneCount, diffgeneCount, annotation = annor.refine_single_cluster(
+geneCount, diffgeneCount, annotation, gene2celltype_g = annor.refine_single_cluster(
     adata, topk_markers, cluster_key, cluster_id, candidate_celltype,
-    key_added, organ, moranI_threshold, strict=0)
-# Set strict>0 to keep only max-confidence cell types per gene.
+    key_added, organ,
+    moranI_threshold=moranI_threshold, strict=strict,
+    split_method=split_method, markergene_method=markergene_method)
+# geneCount: list of (celltype, gene_count, gene_list) — markers per cell type.
+# diffgeneCount: list of (celltype, diff_gene_count, diff_gene_list) — unique markers per cell type.
+# annotation: DataFrame of adata_sub.obs[[key_added]]; the refined sub-cluster labels.
+# gene2celltype_g: NetworkX graph linking gene -> homolo -> celltype. use `nx.write_gexf` to save.
 # The results can be found in the returned annotation[key_added] DataFrame.
 ```
 

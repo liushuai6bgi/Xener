@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""Analyze celltype_weight.csv and output top-5 cell types per cluster for semantic deduplication."""
+"""Analyze celltype_weight.csv and output top-5 cell types per cluster for semantic deduplication.
+
+CLI wrapper used by the Xener agent skill. Reads celltype_weight.csv produced
+by Step 5, extracts the top-K (default 5) cell types per cluster, and writes
+refine_suggestions.json.
+
+Skill context: invoked after Step 5 during references/workflows/refinement.md.
+The agent then performs semantic deduplication (grouping synonyms like
+"phloem" + "vascular tissue") and weight-ratio analysis (weight_2 / weight_1
+> 0.5) to determine which clusters are eligible for refinement. See
+references/workflows/refinement.md for the full decision protocol.
+"""
 
 import argparse
 import os

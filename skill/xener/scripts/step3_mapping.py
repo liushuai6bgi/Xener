@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""Step 3: BLAST homology mapping across species."""
+"""Step 3: BLAST homology mapping across species.
+
+CLI wrapper used by the Xener agent skill. Maps each marker gene to the
+chosen model species via BLASTP, filtering by --pident, --evalue, and
+--bitscore thresholds.
+
+Skill context: invoked by run_pipeline.py or directly during
+references/workflows/step-by-step.md. Writes blastp_{species}.csv and
+gene_homolo_weight.csv as input to Step 4. Pass --species multiple times
+(once per model species) to combine homology evidence across references.
+"""
 
 import argparse
 import os
@@ -11,7 +21,7 @@ from xener import Xener
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True, help="Path to marker_weight.zip")
+    parser.add_argument("--input", required=True, help="Path to marker_weight.csv")
     parser.add_argument("--fasta", required=True, help="Path to non-model species FASTA file")
     parser.add_argument("--species", required=True, nargs="+",
                         help="Model species names (e.g., Brassica_rapa)")
@@ -49,7 +59,7 @@ def main():
         mapping_strict=args.mapping_strict
     )
 
-    output_path = os.path.join(args.outdir, "gene_homolo_weight.zip")
+    output_path = os.path.join(args.outdir, "gene_homolo_weight.csv")
     homolo_weights.to_csv(output_path, index=False)
     print(f"Homology mapping saved to {output_path}")
     print(f"Shape: {homolo_weights.shape}")

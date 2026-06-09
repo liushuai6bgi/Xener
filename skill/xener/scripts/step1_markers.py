@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""Step 1: Extract marker genes from clustered single-cell data."""
+"""Step 1: Extract marker genes from clustered single-cell data.
+
+CLI wrapper used by the Xener agent skill. Reads an .h5ad file with cluster
+labels in adata.obs, runs Xener's marker gene identification, and writes a
+marker_gene.csv checkpoint to --outdir.
+
+Skill context: this is the first of five steps in the Xener pipeline. It is
+invoked by `scripts/run_pipeline.py` (the full pipeline) or called directly
+when iterating on parameters. See skill/xener/references/workflows/step-by-step.md
+for the full workflow and references/parameters.md for CLI flag details.
+"""
 
 import argparse
 import os
@@ -30,7 +40,7 @@ def main():
         batch_key=args.batch_key
     )
 
-    output_path = os.path.join(args.outdir, "marker_gene.zip")
+    output_path = os.path.join(args.outdir, "marker_gene.csv")
     markers.to_csv(output_path, index=False)
     print(f"Marker genes saved to {output_path}")
     print(f"Shape: {markers.shape}")

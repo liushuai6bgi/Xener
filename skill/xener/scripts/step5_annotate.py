@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""Step 5: Annotate cell types from top-k markers."""
+"""Step 5: Annotate cell types from top-k markers.
+
+CLI wrapper used by the Xener agent skill. Reads topk_markers.csv from Step 4
+and propagates gene->celltype weights through the knowledge graph to predict
+cell types per cluster. Supports two propagation modes: `path` (trajectory-
+aware, default) and `node` (single type).
+
+Skill context: invoked by run_pipeline.py or directly during
+references/workflows/step-by-step.md. Writes celltype_weight.csv and
+per-cluster XML files in --outdir. After this step completes, run
+suggest_refine.py to identify mixed clusters eligible for refinement.
+"""
 
 import argparse
 import os
@@ -12,7 +23,7 @@ from xener import Xener
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True, help="Path to topk_markers.zip")
+    parser.add_argument("--input", required=True, help="Path to topk_markers.csv")
     parser.add_argument("--outdir", required=True, help="Output directory for annotations")
     parser.add_argument("--organ", default=None, help="Organ name (e.g., leaf, root)")
     parser.add_argument("--threshold", type=int, default=None,
@@ -51,7 +62,7 @@ def main():
     with open(os.path.join(args.outdir, "cluster2max.json"), "w") as f:
         json.dump({str(k): v for k, v in cluster2max.items()}, f, indent=2)
 
-    celltype_weight.to_csv(os.path.join(args.outdir, "celltype_weight.zip"), index=False)
+    celltype_weight.to_csv(os.path.join(args.outdir, "celltype_weight.csv"), index=False)
 
     print("Annotation complete.")
     print("Cluster annotations:", cluster2celltype)
