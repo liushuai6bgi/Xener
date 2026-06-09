@@ -72,7 +72,11 @@ and heuristics. The high-level flow is:
    (typically: widen `model_species` to include the target species
    itself when it is a model organism) and re-run from Step 3.
    See `workflows/self-tuning-protocol.md` for the gate logic and
-   `workflows/species-selection.md` for the most common fix.
+   `workflows/species-selection.md` for the most common fix. When
+   the gate fails, **also consult `references/log-interpretation.md`**
+   for the stage-by-stage grep-driven diagnosis — the gate identifies
+   the class of failure, the log reference identifies the exact
+   failure inside the class.
 7. **Refine** mixed clusters (`workflows/refinement.md`) if requested
 
 ## Quick start (manual mode)
@@ -120,6 +124,7 @@ three most important constraints:
 | `references/workflows/config-validation.md` | Before running the pipeline, to verify config |
 | `references/workflows/refinement.md` | When splitting a mixed cluster into subtypes |
 | `references/workflows/self-tuning-protocol.md` | **After initial run** — auto-adjust parameters |
+| `references/log-interpretation.md` | **When a run fails or output looks wrong** — grep-driven diagnosis from the run log |
 | `references/output-files.md` | When interpreting `.csv` outputs |
 | `references/troubleshooting.md` | When a step fails or produces unexpected results |
 

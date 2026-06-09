@@ -106,3 +106,35 @@ The `--refine-key` column (default `xener_refine`) is not in
 Run `step3_mapping.py` once per species, then concatenate the
 `gene_homolo_weight.csv` outputs (or pass multiple `--species`
 arguments in a single step-3 invocation).
+
+## Self-debug: when the pipeline "completes" but the result is wrong
+
+The pipeline can exit 0 and still produce biologically useless
+output. In that case, **do not re-run blindly** — diagnose first.
+
+1. **Read `references/log-interpretation.md`** for the full
+   log-driven debug protocol. The xener logger emits a small fixed
+   set of strings; you can `grep` them.
+2. **Run the post-run quality gate** explicitly:
+   `python scripts/check_output.py --outdir <outdir>`. It catches
+   the five most common silent failures (mean KG miss, tail of
+   severe miss, too-few unique top-1 cell types, weak-confidence
+   clusters, empty annotations).
+3. **Grep pipeline landmarks**:
+   ```bash
+   grep -E '>>>|ERROR|WARNING|Traceback' outdir/xener.log
+   ```
+4. **Quick decision table** — match the symptom to the cause:
+
+| Symptom in log / output | Likely cause | Fix |
+|---|---|---|
+| `total X% homolos of organ[...] not in kg` with mean `X > 0.30` | KG coverage gap | Add target species (if model organism) or a closer relative — see `workflows/species-selection.md` |
+| `no candidate type after threshold, set to "unknown"` repeated | `threshold` too strict | Re-run step 5 with `--threshold null` |
+| `multiple mapping detected!` | `mapping_strict=1` collapsing ties | Set `mapping_strict=0` |
+| `>>>Xener pipeline finished` but all clusters have weight ≈ 0 | Empty BLAST result (wrong fasta / wrong model_species) | Verify `non_model_fasta` contains marker genes; verify `model_species` are in `list_species.py` |
+| `BLASTP failed with returncode=N` | BLASTP exit error | Re-read stderr in error message; check disk space and FASTA format |
+| `>>>cell annotation` line shows `0 celltypes before threshold` | Empty `topk_markers.csv` | Re-run step 4 with higher `--top-num` (try 50) |
+| `refine summary: 0 clusters queued for refinement` | Top celltypes have no clear weight drop | Increase `topk` in step 4 or accept dominant types |
+
+For the full stage-by-stage table (Stages 1–6) and the common
+patterns cheat sheet, see `references/log-interpretation.md`.
