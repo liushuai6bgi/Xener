@@ -103,12 +103,12 @@ Each step function (except `get_markers`) returns `(result, debug_params)` — a
 
 ```
 outdir/
-├── marker_gene.zip
-├── marker_weight.zip
-├── blastp_{species}.zip            # one per model species
-├── gene_homolo_weight.zip
-├── topk_markers.zip
-├── celltype_weight.zip
+├── marker_gene.csv
+├── marker_weight.csv
+├── blastp_{species}.csv            # one per model species
+├── gene_homolo_weight.csv
+├── topk_markers.csv
+├── celltype_weight.csv
 ├── debug_params.yaml               # actual parameters used in each step
 ├── config.yaml                     # from run_from_yaml only
 └── annotation/
@@ -258,7 +258,7 @@ of the whole `__call__` (excluding Python import / setup).
 |---|---|---|
 | `BLASTP starting: query=..., db=..., threads=N` | New BLASTP run started. | Wait; the next `BLASTP done in` line will report wall time. |
 | `BLASTP failed with returncode=N` | BLASTP exited non-zero. | xener now raises `RuntimeError`; the message includes stderr. |
-| `BLASTP cache hit: ...zip (N rows, skipping alignment)` | Reused a previous BLASTP result. | If you expected a fresh run, delete `blastp_<species>.zip` or pass a different `outdir`. |
+| `BLASTP cache hit: ...csv (N rows, skipping alignment)` | Reused a previous BLASTP result. | If you expected a fresh run, delete `blastp_<species>.csv` or pass a different `outdir`. |
 | `BLASTP best-hits per (qseqid,sseqid): N rows` | Number of unique query-subject pairs after `idxmax` on bitscore. | Sanity check vs. your marker count — if dramatically lower, your pident/evalue/bitscore thresholds are too strict. |
 | `N groups merged to M groups in mapping` | Inner join on BLAST result dropped some marker rows → clusters have no BLAST hits. | Check your `non_model_fasta` actually contains the marker genes. |
 | `mapping_strict[N] is too loose!` / `multiple mapping detected!` | `mapping_strict` collapsed multi-copy families. | See "Strict modes" section. |
@@ -311,7 +311,7 @@ If many clusters end up `unknown`:
 | `multiple mapping detected!` warnings | `multiple mapping` | Your `mapping_strict=1` is keeping ties across multi-copy families. | Set `mapping_strict=0` or check for duplicated gene entries upstream. |
 | `top1 z-score>3 and top2<3, returning top1` for every cluster | `returning top1` | KG graph propagation is not differentiating between clusters. | Verify the species-homolog overlap is non-trivial; check `gene_homolo_weight.shape` is not tiny. |
 | Refinement modifies `adata.obs` with `_EXP` columns | `will add temporary columns to adata.obs` | Expected behavior of `split_method='bindiv'`. | Use `split_method='argmax'` if you need a clean adata. |
-| `checkpoint invalid (expected N gene-group combos, got M)` | `Checkpoint invalid` | Your `top_num` changed since the last run, so the cached `topk_markers.zip` no longer matches. | Delete `topk_markers.zip` (and downstream) before re-running with new `top_num`. |
+| `checkpoint invalid (expected N gene-group combos, got M)` | `Checkpoint invalid` | Your `top_num` changed since the last run, so the cached `topk_markers.csv` no longer matches. | Delete `topk_markers.csv` (and downstream) before re-running with new `top_num`. |
 | `KG HTTP <METHOD> <PATH> returned <CODE>` | `KG HTTP ... returned` | KG server is unhealthy or URL is wrong. | Retry; verify `KG_url`; check upstream KG health. |
 | Pipeline takes much longer than usual | `BLASTP done in` / `KG get_gene2celltype_kg done in` | One stage has slowed down. | Check the per-stage elapsed times — KG vs. BLASTP vs. `cell_annotation` pinpoint the bottleneck. |
 

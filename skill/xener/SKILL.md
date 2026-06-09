@@ -77,7 +77,11 @@ and heuristics. The high-level flow is:
    for the stage-by-stage grep-driven diagnosis — the gate identifies
    the class of failure, the log reference identifies the exact
    failure inside the class.
-7. **Refine** mixed clusters (`workflows/refinement.md`) if requested
+7. **Refine** mixed clusters (`workflows/refinement.md`) — in autonomous
+   mode, run by default for clusters where the top-2 distinct cell
+   types have an init_weight ratio > 0.5 (see decision matrix in
+   `autonomous-decision-making.md`). In manual mode, ask the user
+   which clusters to refine before running.
 
 ## Quick start (manual mode)
 

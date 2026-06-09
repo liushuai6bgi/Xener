@@ -162,10 +162,10 @@ class Xener:
         # resume_step: 0=marker_gene, 1=marker_weight, 2=mapping, 3=topk_markers, 4=all cached
         resume_step = 0
 
-        marker_gene_path = outdir / 'marker_gene.zip'
-        marker_weight_path = outdir / 'marker_weight.zip'
-        gene_homolo_weight_path = outdir / 'gene_homolo_weight.zip'
-        topk_markers_path = outdir / 'topk_markers.zip'
+        marker_gene_path = outdir / 'marker_gene.csv'
+        marker_weight_path = outdir / 'marker_weight.csv'
+        gene_homolo_weight_path = outdir / 'gene_homolo_weight.csv'
+        topk_markers_path = outdir / 'topk_markers.csv'
 
         # topk_markers (step 4)
         if topk_markers_path.exists():
@@ -274,7 +274,7 @@ class Xener:
             ann_strict, mode=mode, decay_factor=decay_factor)
         debug_params['cell_annotation'] = debug_annotation
         if save:
-            celltype_weight_path = outdir / 'celltype_weight.zip'
+            celltype_weight_path = outdir / 'celltype_weight.csv'
             celltype_weight.to_csv(celltype_weight_path, index=False)
             logger.info('celltype_weight saved to %s', celltype_weight_path)
         logger.info('celltype_weight.shape: %s', celltype_weight.shape)
@@ -462,7 +462,7 @@ class Xener:
                 logger.info('run blastp for %s', species)
                 # Align only the extracted genes
                 blastp_result.append(
-                    blastp(seq_file, self.blastdb[species], outdir / f'blastp_{species}.zip', num_threads)
+                    blastp(seq_file, self.blastdb[species], outdir / f'blastp_{species}.csv', num_threads)
                 )
         os.remove(seq_file)
         blast_result = pd.concat(blastp_result)
@@ -1000,8 +1000,8 @@ class Xener:
             group_gene_homolo_weight.apply(lambda x: homolo2gene.update({x['homolo']: x['gene']}), axis=1)
             sub_g_gene2homolo = nx.Graph()
             for homolo, gene in homolo2gene.items():
-                sub_g_gene2homolo.add_node('homolo_'+homolo, {'name':homolo,'weight':0,'type':'homolo'})
-                sub_g_gene2homolo.add_node('gene_'+gene, {'name':gene,'weight':0,'type':'gene'})
+                sub_g_gene2homolo.add_node('homolo_'+homolo, **{'name':homolo,'weight':0,'type':'homolo'})
+                sub_g_gene2homolo.add_node('gene_'+gene, **{'name':gene,'weight':0,'type':'gene'})
                 sub_g_gene2homolo.add_edge('gene'+gene, 'homolo_'+homolo)
             # Look up marker genes in knowledge graph for each cell type
             source, target, matrix = self.KG.get_gene2celltype_kg(

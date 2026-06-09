@@ -26,6 +26,7 @@ of biological / experimental choices.
 | `ann_strict` | ✅ Yes | Default 0. Set to 1 if multiple clusters share identical top cell types. |
 | `num_threads` | ✅ Yes | Read `os.cpu_count()`. Use max(1, n_cpu - 2). |
 | `outdir` | ⚠️ Ask user if not obvious | Default: `./xener_output/<dataset_basename>`. |
+| Refinement targets | ✅ Yes, with reasoning | After step 5, run `scripts/suggest_refine.py --topk 5` to get top-5 per cluster. Apply semantic dedup (e.g. "phloem" + "vascular tissue" → "phloem"). Mark cluster as eligible if top-2 distinct init_weight ratio > 0.5. Pick up to 3 eligible clusters, prioritizing (a) tight ratios and (b) biological lineages with known subtypes (epidermis, ground tissue, vasculature, immune). Run `scripts/refine_cluster.py` directly — do not ask the user. |
 
 ## Decision protocol for the LLM
 

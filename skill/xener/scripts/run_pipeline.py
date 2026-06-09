@@ -51,7 +51,7 @@ def main():
                 try:
                     st.flush()
                 except Exception:
-                    pass)
+                    pass
 
     sys.stdout = _Tee(_real_stdout, log_fh)
 

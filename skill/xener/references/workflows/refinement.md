@@ -33,11 +33,18 @@ The agent then performs:
 - **Weight check** — for each cluster, compare top-2 distinct
   weights; if ratio > 0.5, mark as **eligible**
 
-## Step B: Confirm with the user
+## Step B: Confirm or proceed
 
-Present eligible clusters with their deduplicated candidate cell
-types and the suggested command. **Wait for confirmation** before
-running refinement.
+**In manual mode** — present eligible clusters with their
+deduplicated candidate cell types and the suggested command.
+**Wait for confirmation** before running refinement.
+
+**In autonomous mode** — skip confirmation. Present a one-line
+summary of which clusters will be refined and why (e.g.
+"refining cluster 4 (atrichoblast vs trichoblast, ratio 0.79) and
+cluster 24 (cortex vs endodermis, ratio 0.78)") and proceed
+directly to Step C. Log the decision in `outdir/autonomous_log.md`
+alongside any other autonomous choices.
 
 ### Example agent reasoning
 
