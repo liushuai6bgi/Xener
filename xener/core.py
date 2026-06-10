@@ -938,8 +938,8 @@ class Xener:
     def refine_single_cluster(self, adata:sc.AnnData, group_gene_homolo_weight:pd.DataFrame, 
             cluster_key:str, cluster_id:str, candidate_celltype:list[str], 
             key_added:str, organ:str=None, moranI_threshold=0.5, strict:int=0,
-            split_method:Literal['bindiv','argmax']='bindiv', 
-            markergene_method:Literal['diff','all']='diff', celltype_geneCount_gene=None) -> tuple[list, list, pd.DataFrame, nx.Graph]:
+            split_method:Literal['bindiv','argmax']='argmax', 
+            markergene_method:Literal['diff','all']='all', celltype_geneCount_gene=None) -> tuple[list, list, pd.DataFrame, nx.Graph]:
         '''
         Annotate a single cluster.
         Parameters:
@@ -998,7 +998,7 @@ class Xener:
             group_gene_homolo_weight = group_gene_homolo_weight[group_gene_homolo_weight['gene'].isin(share_gene)]
 
             group_gene_homolo_weight.apply(lambda x: homolo2gene.update({x['homolo']: x['gene']}), axis=1)
-            sub_g_gene2homolo = nx.Graph()
+            sub_g_gene2homolo = nx.DiGraph()
             for homolo, gene in homolo2gene.items():
                 sub_g_gene2homolo.add_node('homolo_'+homolo, **{'name':homolo,'weight':0,'type':'homolo'})
                 sub_g_gene2homolo.add_node('gene_'+gene, **{'name':gene,'weight':0,'type':'gene'})

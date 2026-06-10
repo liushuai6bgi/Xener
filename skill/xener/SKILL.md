@@ -78,10 +78,13 @@ and heuristics. The high-level flow is:
    the class of failure, the log reference identifies the exact
    failure inside the class.
 7. **Refine** mixed clusters (`workflows/refinement.md`) — in autonomous
-   mode, run by default for clusters where the top-2 distinct cell
-   types have an init_weight ratio > 0.5 (see decision matrix in
-   `autonomous-decision-making.md`). In manual mode, ask the user
-   which clusters to refine before running.
+   mode (complete-annotation), refine **every** cluster where the
+   top-2 distinct cell types have an `init_weight` ratio > 0.5, in
+   order of descending ratio. The previous "up to 3" guidance is
+   withdrawn; see `mandatory-rules.md` §8 and
+   `autonomous-decision-making.md` §"Completeness vs. demonstration"
+   for the full reasoning. In manual mode, present the eligible
+   list and ask the user which to refine before running.
 
 ## Quick start (manual mode)
 

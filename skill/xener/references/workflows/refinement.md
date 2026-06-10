@@ -7,14 +7,27 @@ Moran's I gene filtering and binary / argmax cell assignment.
 
 ## When to suggest refinement
 
-The agent (or user) should suggest refinement for a cluster if
-**both** conditions hold after step 5:
+The agent (or user) should refine a cluster if the following
+condition holds after step 5:
 
-1. **Semantic deduplication** identifies redundant top-5 cell
-   types (e.g., "phloem" + "vascular tissue" → same tissue,
-   keep the higher-weight one).
-2. **Weight ratio** of top-2 distinct cell types:
-   `weight_2 / weight_1 > 0.5` (configurable threshold).
+1. **Weight ratio** of top-2 distinct cell types (after semantic
+   dedup — substring/containment, e.g. "phloem" vs "vascular
+   tissue", or biological-synonym, e.g. "sieve element" vs
+   "phloem") is `weight_2 / weight_1 > 0.5` (configurable
+   threshold).
+
+A high ratio (close to 1.0) means the top-2 cell types are
+nearly tied in KG support — either a real sub-population is
+hidden in the cluster, or step 5's KG propagation created
+spurious secondary weight. **Either way, refine the cluster**
+and let the result decide.
+
+**Do not pre-filter eligible clusters by "biological plausibility
+of the top-2 pair".** A cross-lineage pair (e.g. quiescent center
++ root hair cell at ratio 1.0) is *more* reason to refine, not
+less — it is a signal that the clustering may be wrong, that
+the cluster is a doublet, or that KG propagation biased step 5.
+The agent's job here is to test, not to assume.
 
 ## Step A: Get refinement candidates
 
@@ -33,34 +46,44 @@ The agent then performs:
 - **Weight check** — for each cluster, compare top-2 distinct
   weights; if ratio > 0.5, mark as **eligible**
 
-## Step B: Confirm or proceed
+## Step B: Run refinement on EVERY eligible cluster
 
-**In manual mode** — present eligible clusters with their
-deduplicated candidate cell types and the suggested command.
+**In manual mode** — present the eligible list with their
+deduplicated candidate cell types and the suggested commands.
 **Wait for confirmation** before running refinement.
 
-**In autonomous mode** — skip confirmation. Present a one-line
-summary of which clusters will be refined and why (e.g.
-"refining cluster 4 (atrichoblast vs trichoblast, ratio 0.79) and
-cluster 24 (cortex vs endodermis, ratio 0.78)") and proceed
-directly to Step C. Log the decision in `outdir/autonomous_log.md`
-alongside any other autonomous choices.
+**In autonomous mode (complete-annotation)** — run refinement
+on every eligible cluster. Order the runs by descending ratio
+(tightest first), then descending cluster size. Do not skip
+clusters, do not pick representatives, do not cap at 3. The
+cap was a demo-time heuristic and is withdrawn — see
+`mandatory-rules.md` §8.
 
-### Example agent reasoning
+**In autonomous mode (demonstration only — when the user
+explicitly asks "show me how this works")** — it is acceptable
+to run on 1–3 representative clusters. This is the *only*
+context where "up to 3" applies.
+
+Log the decision (which mode you are in, which clusters were
+refined, in what order) in `outdir/autonomous_log.md` alongside
+any other autonomous choices.
+
+### Example agent reasoning (autonomous, complete-annotation)
 
 ```
-Cluster 0:
-  Top 5: phloem (0.8), vascular tissue (0.75), xylem (0.5),
-          mesophyll (0.4), palisade (0.35)
+33 / 36 clusters have top-2 / top-1 init_weight ratio > 0.5:
+  - c6, c15, c27 (ratio ≥ 0.95) — known biological subtype pairs
+  - c3, c20 (root cap subtypes) — same lineage as c15
+  - c14, c34 (ratio = 1.00) — cross-lineage pairs, refine to
+    test if clustering is bad
+  - ... 25 more
 
-  Agent dedup:
-  - phloem + vascular tissue → same → keep "phloem" (0.8)
-  - mesophyll + palisade → same → keep "mesophyll" (0.4)
-
-  Distinct top-2: phloem (0.8) vs xylem (0.5), ratio=0.625 > 0.5
-  → ELIGIBLE
-
-  Suggested: --cluster-id 0 --celltype phloem,xylem
+Plan: refine all 33. Order: tightest ratio first.
+Cluster c3 (lateral root cap + columella root cap cell, ratio 1.00)
+  --celltype lateral root cap,columella root cap cell
+Cluster c14 (quiescent center + root hair cell, ratio 1.00)
+  --celltype "quiescent center","root hair cell"
+...
 ```
 
 ## Step C: Run refinement
@@ -74,13 +97,45 @@ python scripts/refine_cluster.py \
     --celltype phloem,xylem \
     --organ leaf \
     --moran-i 0.5 \
-    --split-method bindiv \
-    --markergene-method diff \
+    --split-method argmax \
+    --markergene-method all \
     --outdir output/
 ```
 
 **Important**: `--celltype` values must come **exactly** from
 `celltype_weight.csv` for the target cluster. Do not invent names.
+
+> **`--markers` MUST be `gene_homolo_weight.csv` (Step 3 output), NOT
+> `topk_markers.csv` (Step 4 output).** This is the single most common
+> refinement mistake and it fails *silently*: the run completes exit-0 but
+> the cluster does not split (every cell gets one label).
+>
+> Why: `refine_single_cluster` uses the `--markers` table only to collect
+> the cluster's **homolog set**, which it feeds to the KG to find markers for
+> each candidate cell type. `topk_markers.csv` is truncated to `top_num`
+> genes per cluster (e.g. 20), so the homolog set is thin, the KG returns too
+> few candidate-discriminating markers, and `argmax` dumps all cells into one
+> candidate → a `[N, 0]` result and a single-label cluster. `gene_homolo_weight.csv`
+> carries the full BLAST homolog set per cluster, which is what the split needs.
+> (The weight columns are ignored either way — only `group`/`gene`/`homolo`
+> are read — so this is purely about homolog *coverage*.)
+>
+> Symptom to watch for: nearly every "eligible" cluster refines to a single
+> uniform subtype. That is usually *this bug*, not evidence that the
+> clustering is clean. `refine_cluster.py` prints a `[WARN] ... only N unique
+> homologs` line when the `--markers` file looks truncated.
+
+> **Use `--markergene-method all --split-method argmax`.** This combination
+> has the **highest refinement success rate** in testing — it actually splits
+> mixed clusters into sub-populations. The script defaults
+> (`--markergene-method diff --split-method bindiv`) frequently produce *no*
+> split: `diff` returns 0 differential markers whenever the two candidate
+> cell types map to overlapping homologs in the KG (very common for close
+> sub-types such as `lateral root cap` vs `columella root cap cell`), and
+> `bindiv` then dumps every cell into one candidate, yielding a `[N, 0]`
+> result and a single-label cluster. If you see `Diff gene counts: []` or
+> `refine_single_cluster X total: ['<one type>']` for clusters you expected
+> to split, switch to `all` + `argmax` and re-run.
 
 ## Step D: Inspect the refined annotation
 
@@ -126,9 +181,14 @@ neighbors = list(g.neighbors('AT1G52050'))
 
 See `parameters.md` for the full refinement parameter table.
 The three most important knobs:
+- `--markergene-method` — `all` (all top-k genes) vs `diff` (differential
+  only). **Use `all`**: `diff` returns 0 markers when candidates share KG
+  homologs, which blocks the split.
+- `--split-method` — `argmax` (assign by max score) vs `bindiv` (binary
+  divide). **Use `argmax`**: it splits reliably; `bindiv` tends to collapse
+  to one candidate.
 - `--moran-i` (0.5) — gene spatial autocorrelation threshold;
-  higher = stricter
-- `--split-method` — `bindiv` (binary divide) vs `argmax`
-  (assign by max score)
-- `--markergene-method` — `diff` (differential only) vs
-  `all` (all top-k genes)
+  higher = stricter.
+
+The empirically best combination for splitting mixed clusters is
+**`--markergene-method all --split-method argmax`** (highest success rate).

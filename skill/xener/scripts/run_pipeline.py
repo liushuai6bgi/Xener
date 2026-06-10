@@ -66,6 +66,63 @@ def main():
         sys.stdout = _real_stdout
         log_fh.close()
 
+    # Persist a LIGHTWEIGHT annotation artifact (per-cell UMAP coordinates +
+    # label columns) instead of a full h5ad copy, to avoid duplicating a
+    # multi-GB expression matrix on disk. scripts/plot_umap.py reconstructs a
+    # minimal AnnData from this CSV. Neither run_from_yaml nor refine_cluster.py
+    # persists these labels, so this is the single consolidation point for
+    # 'xener' / 'xener_refine'.
+    try:
+        import scanpy as sc
+        import pandas as pd
+        from glob import glob
+
+        h5ad_in = config["non_model_h5ad"]
+        cluster_key = config["cluster_key"]
+        adata = sc.read(h5ad_in)
+
+        c2c = {str(k): v for k, v in cluster2celltype.items()}
+        c2m = {str(k): v for k, v in cluster2max.items()}
+        clusters = adata.obs[cluster_key].astype(str)
+
+        out = pd.DataFrame(index=adata.obs_names)
+        out[cluster_key] = clusters.values
+        out["xener"] = clusters.map(c2c).astype(str).values
+        out["xener_max"] = clusters.map(c2m).astype(str).values
+
+        # UMAP coordinates, so plotting needs no access to the source h5ad.
+        if "X_umap" in adata.obsm:
+            umap = adata.obsm["X_umap"]
+            out["UMAP_1"] = umap[:, 0]
+            out["UMAP_2"] = umap[:, 1]
+        else:
+            print("[WARN] X_umap not in adata.obsm; annotation CSV will have "
+                  "no UMAP coordinates.", file=sys.stderr)
+
+        # Merge refinement: cluster-level label, overwritten per cell by subtype.
+        refine_dir = Path(config["outdir"]) / "refine_output"
+        refine_csvs = sorted(glob(str(refine_dir / "refined_*.csv")))
+        if refine_csvs:
+            refine_col = out["xener"].copy()
+            n_refined_cells = 0
+            for csv in refine_csvs:
+                df = pd.read_csv(csv, index_col=0)
+                if "xener_refine" not in df.columns:
+                    continue
+                common = out.index.intersection(df.index)
+                refine_col.loc[common] = df.loc[common, "xener_refine"].astype(str)
+                n_refined_cells += len(common)
+            out["xener_refine"] = refine_col.astype(str)
+            print(f"Merged {len(refine_csvs)} refinement CSV(s) into "
+                  f"xener_refine ({n_refined_cells} cells).")
+
+        basename = Path(h5ad_in).stem
+        annot_path = Path(config["outdir"]) / f"{basename}_annotation.csv"
+        out.to_csv(annot_path)
+        print(f"Annotation artifact written to {annot_path}")
+    except Exception as e:
+        print(f"[WARN] Failed to persist annotation artifact: {e}", file=sys.stderr)
+
     # Mandatory post-run quality gate. If this fails, the pipeline exits
     # non-zero and the run is not considered successful. The agent must
     # inspect the gate output, adjust the config (most commonly

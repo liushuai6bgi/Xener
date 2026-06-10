@@ -269,6 +269,25 @@ def plot_refinement(adata, cluster_key, cluster_id, refine_key, embedding_key, o
 # CLI                                                                   #
 # --------------------------------------------------------------------- #
 
+def _load_adata(path, embedding_key):
+    """Load the plotting input into an AnnData.
+
+    Accepts either a full ``.h5ad`` or the lightweight annotation ``.csv``
+    written by run_pipeline.py (per-cell UMAP coordinates + label columns).
+    For the CSV case we construct a minimal AnnData with an empty expression
+    matrix and inject the UMAP coordinates into ``obsm`` — no multi-GB matrix
+    is ever read or stored.
+    """
+    if str(path).lower().endswith(".csv"):
+        import anndata as ad
+        df = pd.read_csv(path, index_col=0)
+        adata = ad.AnnData(X=np.zeros((len(df), 1), dtype=np.float32), obs=df.copy())
+        if {"UMAP_1", "UMAP_2"}.issubset(df.columns):
+            adata.obsm[embedding_key] = df[["UMAP_1", "UMAP_2"]].to_numpy()
+        return adata
+    return sc.read_h5ad(path)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     parser.add_argument("--input", required=True, help="Path to .h5ad file")
@@ -299,8 +318,9 @@ def main():
     outdir.mkdir(parents=True, exist_ok=True)
 
     if not os.path.exists(args.input):
-        raise FileNotFoundError(f"h5ad not found: {args.input}")
-    if args.embedding_key not in (adata := sc.read_h5ad(args.input)).obsm:
+        raise FileNotFoundError(f"input not found: {args.input}")
+    adata = _load_adata(args.input, args.embedding_key)
+    if args.embedding_key not in adata.obsm:
         raise KeyError(
             f"Embedding '{args.embedding_key}' not in adata.obsm. "
             f"Available: {list(adata.obsm.keys())}"

@@ -77,3 +77,32 @@ type names — they will fail at runtime.
 
 You do not need to specify every parameter. The pipeline reads defaults
 from the package config. Override only when you have a reason.
+
+## 8. Completeness over demonstration
+
+When the user provides a real dataset and asks for cell-type
+annotation, the task is **complete-annotation**, not a workflow
+demo. The agent must refine **every** cluster where the top-2
+distinct `init_weight` ratio is > 0.5 — not a representative
+subset, not a "demonstrably mixed" subset, not a 1–3-cluster
+cap. Refining N eligible clusters costs ~N×1 minute and produces
+the per-cluster sub-population the user needs. The previous
+"pick up to 3" heuristic was a demo-mode leftover and is
+**withdrawn** — see `autonomous-decision-making.md` §"Completeness
+vs. demonstration" for the full reasoning.
+
+Specific anti-patterns that violate this rule:
+
+- ❌ Selecting clusters "for lineage coverage" (one vasculature,
+  one ground tissue, one root cap) — that is a presentation
+  choice, not an annotation choice.
+- ❌ Skipping a high-ratio cluster because the top-2 cell types
+  "look biologically unrelated" (e.g. quiescent center + root
+  hair cell) — that unrelatedness is the *reason* to refine; it
+  is a signal that the clustering may be bad or that KG
+  propagation biased step 5. The refinement is the test.
+- ❌ Treating 3/3 uniform refinements as "sufficient evidence" the
+  clustering is good — that is a sample of 3, not the dataset.
+- ❌ Capping at any small number to "leave time for visualization"
+  or "keep the narrative clean". The user does not pay for agent
+  time; do the work.

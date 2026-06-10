@@ -64,10 +64,20 @@ individual steps.
 | `--celltype` | required | Comma-separated candidate cell types (must come from `celltype_weight.csv`) |
 | `--organ` | required | Organ filter |
 | `--moran-i` | `0.5` | Moran's I threshold (range [-1, 1]; >0.5 = stricter) |
-| `--split-method` | `bindiv` | `bindiv` (binary division) or `argmax` |
-| `--markergene-method` | `diff` | `diff` (differential only) or `all` |
+| `--split-method` | `argmax` | `argmax` (assign by max score) or `bindiv` (binary division) |
+| `--markergene-method` | `all` | `all` (all top-k genes) or `diff` (differential only) |
 | `--key-added` | `xener_refine` | Column name in `adata.obs` for refined annotation |
 | `--outdir` | required | Output directory |
+
+> **Defaults reflect the empirically best combination:**
+> `--markergene-method all --split-method argmax` has the **highest
+> refinement success rate** (it actually splits mixed clusters into
+> sub-populations rather than collapsing them to a single label). The old
+> defaults (`diff` / `bindiv`) frequently failed to split: `diff` returns 0
+> markers whenever the two candidate cell types share homologs in the KG, and
+> `bindiv` then assigns every cell to one candidate (a `[N, 0]` result).
+> Override to `diff` / `bindiv` only when you specifically want the stricter
+> differential/binary behavior.
 
 ## Full pipeline (`run_pipeline.py`)
 
