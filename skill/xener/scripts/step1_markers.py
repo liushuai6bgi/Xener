@@ -16,7 +16,7 @@ import os
 import pandas as pd
 import scanpy as sc
 
-from xener import Xener
+from _xener_init import build_xener, add_init_config_arg
 
 
 def main():
@@ -26,12 +26,13 @@ def main():
     parser.add_argument("--outdir", required=True, help="Output directory")
     parser.add_argument("--preprocess", action="store_true", help="Run quality control preprocessing")
     parser.add_argument("--batch-key", default=None, help="Batch column for batch correction")
+    add_init_config_arg(parser)
     args = parser.parse_args()
 
     os.makedirs(args.outdir, exist_ok=True)
 
     adata = sc.read(args.input)
-    annor = Xener()
+    annor = build_xener(args.init_config)
 
     markers = annor.get_markers(
         adata,

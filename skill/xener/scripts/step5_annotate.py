@@ -18,7 +18,7 @@ from pathlib import Path
 import pandas as pd
 import json
 
-from xener import Xener
+from _xener_init import build_xener, add_init_config_arg
 
 
 def main():
@@ -36,13 +36,14 @@ def main():
                         help="Weight decay factor for graph propagation")
     parser.add_argument("--ann-strict", type=int, default=0,
                         help="Strict mode for annotation: <0=loose (binarize), 0=default, 1=max per marker, 2=global max")
+    add_init_config_arg(parser)
     args = parser.parse_args()
 
     outdir = Path(args.outdir)
     os.makedirs(outdir, exist_ok=True)
 
     topk = pd.read_csv(args.input)
-    annor = Xener()
+    annor = build_xener(args.init_config)
 
     cluster2celltype, cluster2max, celltype_weight, debug_ann = \
         annor.cell_annotation(

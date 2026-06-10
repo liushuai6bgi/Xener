@@ -27,6 +27,14 @@ python my_custom_script.py
 **Exception**: Only `python -c "import xener"` is permitted to check
 whether xener is installed. No other xener usage is allowed in one-liners.
 
+**Note on `scripts/_xener_init.py`**: this is a *helper module*, not a CLI —
+the other scripts import `build_xener()` from it so they all construct the
+`Xener` object the same way (and can honor an optional `--init-config`). Do not
+run it directly, and do not hand-write your own `Xener(...)` construction to
+point at a custom KG / BLAST database. The supported way to use custom
+infrastructure is the `--init-config` flag plus `scripts/init_xener.py` to
+validate it — see `workflows/initialization.md`.
+
 ## 2. Never pass config via stdin
 
 ```bash

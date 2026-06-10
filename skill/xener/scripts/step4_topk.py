@@ -14,7 +14,7 @@ import argparse
 import os
 import pandas as pd
 
-from xener import Xener
+from _xener_init import build_xener, add_init_config_arg
 
 
 def main():
@@ -26,12 +26,13 @@ def main():
                         help="Keep multiple homologs per gene")
     parser.add_argument("--no-multihomolo", dest="multihomolo", action="store_false",
                         help="Keep only top homolog per gene")
+    add_init_config_arg(parser)
     args = parser.parse_args()
 
     os.makedirs(args.outdir, exist_ok=True)
 
     homolo_weights = pd.read_csv(args.input)
-    annor = Xener()
+    annor = build_xener(args.init_config)
 
     topk, debug_topk = annor.get_topk_gene(homolo_weights, top_num=args.top_num, multihomolo=args.multihomolo)
 

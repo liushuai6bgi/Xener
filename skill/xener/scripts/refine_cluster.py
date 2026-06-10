@@ -55,7 +55,7 @@ from pathlib import Path
 import pandas as pd
 import scanpy as sc
 
-from xener import Xener
+from _xener_init import build_xener, add_init_config_arg
 
 
 # --------------------------------------------------------------------- #
@@ -250,6 +250,7 @@ def main():
                         help="Marker gene method (default all: highest refinement success rate)")
     parser.add_argument("--strict", type=int, default=0,
                         help="Strict mode: 0=default, >0=keep max-confidence cell type per gene")
+    add_init_config_arg(parser)
     args = parser.parse_args()
 
     # ---- validate mode selection ----
@@ -283,7 +284,7 @@ def main():
         print("Computing neighbors...")
         sc.pp.neighbors(adata)
 
-    annor = Xener()  # connects to the KG once, reused for every cluster
+    annor = build_xener(args.init_config)  # connects to the KG once, reused for every cluster
 
     # ---- refine every job against the shared resources ----
     collected = []      # list of (cluster_id, annotation_df) for merging

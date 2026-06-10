@@ -10,16 +10,17 @@ be presented to the user for explicit confirmation.
 """
 
 import argparse
-from xener import Xener
+from _xener_init import build_xener, add_init_config_arg
 
 
 def main():
     parser = argparse.ArgumentParser(description="List available organs")
     parser.add_argument("--species", default=None,
                         help="Filter organs by species (e.g., Brassica_rapa)")
+    add_init_config_arg(parser)
     args = parser.parse_args()
 
-    annor = Xener()
+    annor = build_xener(args.init_config)
     df = annor.KG.species_organ_cell
 
     if args.species:

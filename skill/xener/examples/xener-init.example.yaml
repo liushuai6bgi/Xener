@@ -1,0 +1,36 @@
+# Example Xener INIT-config (xener-init.yaml)
+#
+# This is the *init* config — it controls WHERE Xener gets its data, not WHAT
+# you annotate. (The "what" lives in your run config.yaml: model_species,
+# organ, non_model_h5ad, etc. — see config.example.yaml.)
+#
+# Use this only if you want to point Xener at your own infrastructure instead
+# of the public-cloud defaults. EVERY key below is OPTIONAL — delete the lines
+# you don't need. With no init config at all, Xener uses the public cloud
+# Knowledge Graph (https://xenor.dcs.cloud) and the bundled BLAST database.
+#
+# Validate before running the pipeline:
+#     python scripts/init_xener.py --init-config xener-init.yaml
+#
+# Then pass the SAME file to the pipeline:
+#     python scripts/run_pipeline.py --config config.yaml --init-config xener-init.yaml
+#
+# Keep comments ASCII-only and save as UTF-8 (see mandatory-rules.md 2b).
+
+# --- Knowledge Graph endpoint -------------------------------------------
+# Omit all three KG_* keys to use the public cloud KG.
+# An http(s):// URL uses the HTTP backend; anything else (bolt://) uses the
+# Neo4j Bolt backend, which also needs KG_usr / KG_pwd.
+KG_url: bolt://localhost:7687       # or http://localhost:7474
+KG_usr: neo4j                       # KG username (Bolt backend)
+KG_pwd: please-change-me            # KG password (Bolt backend)
+
+# --- BLAST database -----------------------------------------------------
+# Directory of makeblastdb protein databases (one per model species). Omit to
+# use the bundled database that ships in ~/.xener/data/blastdb/prot.
+blastdb_path: /data/xener/blastdb/prot
+
+# --- BLASTP result cache (optional) -------------------------------------
+# A directory where Xener may reuse previously-computed BLASTP results to skip
+# re-running BLAST across runs. Omit if you do not have one.
+# blastp_result_path: /data/xener/blastp_cache

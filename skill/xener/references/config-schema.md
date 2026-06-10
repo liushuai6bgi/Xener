@@ -65,3 +65,26 @@ outdir: output/ERP132245
 
 Recommended: include the dataset label in the path (e.g.,
 `output/PRJNA662627/`) so multiple runs do not collide.
+
+## Optional: init-config keys (WHERE Xener gets its data)
+
+The fields above are the **run config** — they say *what* to annotate. A
+separate, optional set of keys controls *where* Xener gets its data: which
+Knowledge Graph to connect to and which BLAST database to use. With none of
+them, Xener uses the public cloud KG (`https://xenor.dcs.cloud`) and the
+bundled BLAST database — the default for virtually every run.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `KG_url` | string | cloud | KG endpoint. `http(s)://` → HTTP backend; `bolt://` → Neo4j Bolt backend |
+| `KG_usr` | string | none | KG username (Bolt backend) |
+| `KG_pwd` | string | none | KG password (Bolt backend) |
+| `blastdb_path` | string | bundled | Local BLAST protein DB directory (makeblastdb output) |
+| `blastp_result_path` | string | none | Optional BLASTP result cache directory |
+
+These can be supplied either as a **separate** `--init-config` YAML or
+**inlined** into this config file (a separate file wins if both are present).
+Validate them with `python scripts/init_xener.py --init-config <file>` before
+running. Full guidance and examples: `workflows/initialization.md` and
+`examples/xener-init.example.yaml`.
+

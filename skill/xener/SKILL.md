@@ -124,6 +124,26 @@ If the user wants full control, the manual flow is:
    Visualization coverage must match refinement coverage; see
    `workflows/refinement.md` → Step D.
 
+## Custom initialization (own KG / BLAST database)
+
+By default Xener uses the public cloud Knowledge Graph and a bundled BLAST
+database — no setup needed. If the user wants their **own** infrastructure
+(on-prem Neo4j KG, a locally-built BLAST DB, or a BLASTP cache), they can
+supply an **init-config** that says *where* Xener gets its data — distinct from
+the run `config.yaml`, which says *what* to annotate.
+
+Validate it first, then pass the same `--init-config` to the pipeline (every
+Xener-building script accepts the flag):
+
+```bash
+python scripts/init_xener.py --init-config xener-init.yaml      # validate
+python scripts/run_pipeline.py --config config.yaml --init-config xener-init.yaml
+```
+
+All init keys are optional and may instead be inlined into `config.yaml`. See
+`references/workflows/initialization.md` and
+`examples/xener-init.example.yaml`.
+
 ## Mandatory rules (read `references/mandatory-rules.md` first)
 
 The full list of do's and don'ts is in `references/mandatory-rules.md`. The
@@ -142,6 +162,7 @@ three most important constraints:
 | `references/config-schema.md` | When writing or validating a YAML config |
 | `references/parameters.md` | When tuning CLI parameters (e.g., pident threshold, top-k) |
 | `references/workflows/inspection.md` | **First step in autonomous mode** — inspect h5ad |
+| `references/workflows/initialization.md` | When the user wants a custom KG / BLAST database (`--init-config`) instead of the cloud defaults |
 | `references/workflows/species-selection.md` | When picking model_species for a target |
 | `references/workflows/full-pipeline.md` | When running end-to-end with `run_pipeline.py` |
 | `references/workflows/step-by-step.md` | When iterating on individual steps |
@@ -170,4 +191,6 @@ empty for unrefined cells) are in `references/output-files.md`.
 
 ## Examples
 
-See `examples/config.example.yaml` for a complete config file.
+See `examples/config.example.yaml` for a complete run config (what to
+annotate), and `examples/xener-init.example.yaml` for an init config (custom
+KG / BLAST database — only needed for non-default infrastructure).

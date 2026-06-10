@@ -33,6 +33,28 @@ The BLAST database for the chosen model species is not installed
 locally. Check the `xener` package documentation for BLAST database
 installation. This is a package-level issue, not a skill issue.
 
+## Custom `--init-config`: Xener fails to initialize
+
+When pointing Xener at a custom KG / BLAST database with `--init-config`,
+**validate the config first** so you fail fast with a clear message:
+
+```bash
+python scripts/init_xener.py --init-config xener-init.yaml
+```
+
+Common causes when it exits non-zero:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Connection / timeout error on init | `KG_url` host/port wrong, KG not running, or firewall | Verify the endpoint is reachable; for `bolt://` confirm the Neo4j server is up |
+| Auth error from a `bolt://` KG | `KG_usr` / `KG_pwd` missing or wrong | Add valid credentials (HTTP backends usually need none) |
+| `BLAST database exposes 0 reference species` | `blastdb_path` is not a makeblastdb protein-DB directory | Point it at the directory holding the per-species DBs (or omit to use the bundled DB) |
+| `KG returned 0 organs` | KG endpoint resolved but holds no `species_organ_cell` data | Wrong KG instance/URL — double-check `KG_url` |
+| Unrecognized key warning (e.g. `KG_URL`) | Typo'd key (keys are case-sensitive) | Use exactly `KG_url`, `KG_usr`, `KG_pwd`, `blastdb_path`, `blastp_result_path` |
+
+All init keys are optional — omit any you do not need; the omitted ones fall
+back to the cloud / bundled defaults. See `workflows/initialization.md`.
+
 ## Step 5 returns an empty annotation
 
 Likely causes (in order of likelihood):

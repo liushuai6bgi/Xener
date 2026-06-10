@@ -16,7 +16,7 @@ import os
 from pathlib import Path
 import pandas as pd
 
-from xener import Xener
+from _xener_init import build_xener, add_init_config_arg
 
 
 def main():
@@ -38,13 +38,14 @@ def main():
                         help="Number of threads for BLAST")
     parser.add_argument("--mapping-strict", type=int, default=0,
                         help="Strict mode for BLAST mapping: <0=loose (weight=1), 0=default, 1=top per group/gene")
+    add_init_config_arg(parser)
     args = parser.parse_args()
 
     outdir = Path(args.outdir)
     os.makedirs(outdir, exist_ok=True)
 
     markers = pd.read_csv(args.input)
-    annor = Xener()
+    annor = build_xener(args.init_config)
 
     homolo_weights, debug_map = annor.mapping(
         markers,

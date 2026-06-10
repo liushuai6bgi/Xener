@@ -19,12 +19,24 @@ import os
 import sys
 from pathlib import Path
 
-from xener import Xener
+# Sibling import: scripts/ is sys.path[0] when invoked as `python scripts/...`.
+# build_xener honors an optional init-config (KG endpoint / BLAST DB); with
+# none it is exactly Xener(), so default runs are unchanged.
+from _xener_init import build_xener, load_init_config, INIT_CONFIG_KEYS
 
 
 def main():
     parser = argparse.ArgumentParser(description="Run xener full pipeline")
     parser.add_argument("--config", required=True, help="Path to config.yaml")
+    parser.add_argument(
+        "--init-config", default=None, metavar="PATH",
+        help="Path to a SEPARATE init-config YAML describing WHERE Xener gets "
+             "its data (KG_url / KG_usr / KG_pwd, blastdb_path, "
+             "blastp_result_path). Optional: you may instead inline those same "
+             "keys directly into --config. Omit both to use the public cloud "
+             "KG + bundled BLAST database. See "
+             "references/workflows/initialization.md.",
+    )
     args = parser.parse_args()
 
     # Read the config as UTF-8 explicitly. Without an explicit encoding,
@@ -35,6 +47,24 @@ def main():
         config = yaml.safe_load(f)
 
     os.makedirs(config["outdir"], exist_ok=True)
+
+    # Resolve the init-config (WHERE Xener gets its data) from one of two
+    # places, in priority order:
+    #   1. a separate --init-config file, or
+    #   2. KG_url / blastdb_path / ... keys inlined directly into config.yaml.
+    # Either is optional; with neither, build_xener() == Xener() (cloud KG +
+    # bundled BLAST DB), so existing configs run exactly as before.
+    if args.init_config:
+        init_config = load_init_config(args.init_config)
+        print(f"Using init-config from {args.init_config}: "
+              f"{ {k: ('***' if k == 'KG_pwd' and v else v) for k, v in init_config.items()} }")
+    else:
+        init_config = {k: config[k] for k in INIT_CONFIG_KEYS if k in config}
+        if init_config:
+            print(f"Using init-config inlined in {args.config}: "
+                  f"{ {k: ('***' if k == 'KG_pwd' and v else v) for k, v in init_config.items()} }")
+        else:
+            init_config = None
 
     # Mirror all stdout (including xener's own logger output, which prints
     # the per-cluster "total X% homolos of organ[...] not in kg" lines the
@@ -60,7 +90,7 @@ def main():
     sys.stdout = _Tee(_real_stdout, log_fh)
 
     try:
-        annor = Xener()
+        annor = build_xener(init_config)
         cluster2celltype, cluster2max, debug_params = annor.run_from_yaml(args.config)
 
         print("Pipeline complete.")

@@ -11,14 +11,15 @@ Animals / etc. — see the formatting rule in skill/xener/SKILL.md.
 """
 
 import argparse
-from xener import Xener
+from _xener_init import build_xener, add_init_config_arg
 
 
 def main():
     parser = argparse.ArgumentParser(description="List available reference species")
+    add_init_config_arg(parser)
     args = parser.parse_args()
 
-    annor = Xener()
+    annor = build_xener(args.init_config)
     species = annor.blastdb.keys()
 
     print(f"Available species ({len(species)}):")

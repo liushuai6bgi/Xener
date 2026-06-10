@@ -14,7 +14,7 @@ import argparse
 import os
 import pandas as pd
 
-from xener import Xener
+from _xener_init import build_xener, add_init_config_arg
 
 
 def main():
@@ -23,12 +23,13 @@ def main():
     parser.add_argument("--method", default="prod", choices=["prod", "sum"],
                         help="Weight calculation method")
     parser.add_argument("--outdir", required=True, help="Output directory")
+    add_init_config_arg(parser)
     args = parser.parse_args()
 
     os.makedirs(args.outdir, exist_ok=True)
 
     markers = pd.read_csv(args.input)
-    annor = Xener()
+    annor = build_xener(args.init_config)
 
     weights, debug_gw = annor.get_gene_weight(markers, marker_weight_method=args.method)
 
