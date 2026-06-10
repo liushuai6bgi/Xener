@@ -137,11 +137,50 @@ python scripts/refine_cluster.py \
 > `refine_single_cluster X total: ['<one type>']` for clusters you expected
 > to split, switch to `all` + `argmax` and re-run.
 
-## Step D: Inspect the refined annotation
+## Step D: Inspect and visualize the refined annotation
 
 Refinement writes a new column (default `xener_refine`) to
-`adata.obs` containing the sub-cluster label. Visualize the
-refined UMAP to confirm the split is biologically meaningful.
+`adata.obs` / the consolidated annotation CSV, containing the
+sub-cluster label for **refined** clusters only. Cells in
+unrefined clusters are left empty (NaN) — that is intentional;
+`xener_refine` is the refinement result, not a cluster-level
+relabel. Do not back-fill it from `xener` (see
+`references/output-files.md` → "Annotation columns").
+
+**Visualize the whole result, then each split.** Two figures:
+
+1. **Overview** — one call, four panels (cluster | `xener` |
+   `xener_max` | `xener_refine`), unrefined cells drawn gray:
+
+   ```bash
+   python scripts/plot_umap.py --input <outdir>/<dataset>_annotation.csv \
+       --mode overview --cluster-key leiden --outdir <outdir>/
+   ```
+
+2. **Per-split** — in complete-annotation mode, plot **every
+   cluster that actually split into >1 subtype**, not a
+   "representative" handful. Cherry-picking a few split plots is
+   the same demo-mode shortcut withdrawn for refinement itself
+   (`mandatory-rules.md` §8): visualization coverage must match
+   refinement coverage. A cluster that refined to a single uniform
+   label has nothing to show and can be skipped; one that split is
+   exactly what the user needs to see.
+
+   Determine which clusters split from the merged `xener_refine`
+   (a cluster split if its cells carry >1 distinct `xener_refine`
+   value), then loop:
+
+   ```bash
+   for cid in <every cluster that split>; do
+     python scripts/plot_umap.py --input <outdir>/<dataset>_annotation.csv \
+         --mode refine --cluster-key leiden --cluster-id "$cid" \
+         --refine-key xener_refine --outdir <outdir>/
+   done
+   ```
+
+   Log how many clusters split and confirm you plotted all of them
+   (e.g. "22 clusters split → 22 refine PNGs"). If you plot fewer,
+   say why each was skipped.
 
 ## Return values from `refine_single_cluster`
 

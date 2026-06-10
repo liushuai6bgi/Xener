@@ -27,7 +27,11 @@ def main():
     parser.add_argument("--config", required=True, help="Path to config.yaml")
     args = parser.parse_args()
 
-    with open(args.config, "r") as f:
+    # Read the config as UTF-8 explicitly. Without an explicit encoding,
+    # Python uses the platform default (e.g. GBK on zh-CN Windows), which
+    # raises UnicodeDecodeError the moment a YAML comment contains a non-ASCII
+    # byte such as an em-dash. Configs are authored as UTF-8, so decode as UTF-8.
+    with open(args.config, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
     os.makedirs(config["outdir"], exist_ok=True)
@@ -99,11 +103,18 @@ def main():
             print("[WARN] X_umap not in adata.obsm; annotation CSV will have "
                   "no UMAP coordinates.", file=sys.stderr)
 
-        # Merge refinement: cluster-level label, overwritten per cell by subtype.
+        # Merge refinement: per-cell subtype label. This column carries ONLY
+        # the refinement result - a cell is labeled iff its cluster was
+        # refined; cells in unrefined clusters stay EMPTY (NaN), not copied
+        # from `xener`. Conflating the two would silently overstate how much of
+        # the dataset was actually split. Coalesce downstream if you need a
+        # fully-populated column: out["xener_refine"].fillna(out["xener"]).
         refine_dir = Path(config["outdir"]) / "refine_output"
         refine_csvs = sorted(glob(str(refine_dir / "refined_*.csv")))
         if refine_csvs:
-            refine_col = out["xener"].copy()
+            refine_col = pd.Series(
+                pd.NA, index=out.index, dtype=object
+            )
             n_refined_cells = 0
             for csv in refine_csvs:
                 df = pd.read_csv(csv, index_col=0)
@@ -112,9 +123,11 @@ def main():
                 common = out.index.intersection(df.index)
                 refine_col.loc[common] = df.loc[common, "xener_refine"].astype(str)
                 n_refined_cells += len(common)
-            out["xener_refine"] = refine_col.astype(str)
+            out["xener_refine"] = refine_col
+            n_unrefined = int(out["xener_refine"].isna().sum())
             print(f"Merged {len(refine_csvs)} refinement CSV(s) into "
-                  f"xener_refine ({n_refined_cells} cells).")
+                  f"xener_refine ({n_refined_cells} cells labeled, "
+                  f"{n_unrefined} left empty = not refined).")
 
         basename = Path(h5ad_in).stem
         annot_path = Path(config["outdir"]) / f"{basename}_annotation.csv"

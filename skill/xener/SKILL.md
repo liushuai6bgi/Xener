@@ -85,6 +85,12 @@ and heuristics. The high-level flow is:
    `autonomous-decision-making.md` §"Completeness vs. demonstration"
    for the full reasoning. In manual mode, present the eligible
    list and ask the user which to refine before running.
+8. **Visualize** (`workflows/refinement.md` Step D) — run `plot_umap.py
+   --mode overview` once, then `--mode refine` for **every** cluster
+   that split into >1 subtype. Visualization coverage must match
+   refinement coverage; plotting only a "representative" few is the
+   same demo-mode shortcut withdrawn in step 7. Clusters that refined
+   to a single uniform label have nothing to plot and are skipped.
 
 ## Quick start (manual mode)
 
@@ -98,14 +104,25 @@ If the user wants full control, the manual flow is:
    python scripts/run_pipeline.py --config config.yaml
    ```
 5. **Refine mixed clusters** (optional): see `references/workflows/refinement.md`
-6. **Visualize** the annotation and/or refinement as UMAP PNGs:
+6. **Visualize** the annotation and/or refinement as UMAP PNGs. The input can be
+   the lightweight `{dataset}_annotation.csv` (UMAP coords + labels) — no need to
+   reload the multi-GB h5ad:
    ```bash
-   python scripts/plot_umap.py --input data.h5ad --mode annotation \
-       --cluster-key leiden --outdir output/
-   python scripts/plot_umap.py --input data.h5ad --mode refine \
-       --cluster-key leiden --cluster-id 4 \
+   # Overview: cluster | xener | xener_max | xener_refine in one figure
+   python scripts/plot_umap.py --input output/edf/edf_annotation.csv \
+       --mode overview --cluster-key leiden --outdir output/
+   # Whole-dataset annotation (2 panels)
+   python scripts/plot_umap.py --input output/edf/edf_annotation.csv \
+       --mode annotation --cluster-key leiden --outdir output/
+   # One refined cluster (repeat for EVERY cluster that split; see below)
+   python scripts/plot_umap.py --input output/edf/edf_annotation.csv \
+       --mode refine --cluster-key leiden --cluster-id 4 \
        --refine-key xener_refine --outdir output/
    ```
+   In complete-annotation mode, plot a `--mode refine` figure for **every**
+   cluster that split into >1 subtype — not a representative subset.
+   Visualization coverage must match refinement coverage; see
+   `workflows/refinement.md` → Step D.
 
 ## Mandatory rules (read `references/mandatory-rules.md` first)
 
@@ -143,7 +160,13 @@ After Step 5 (and optionally after refinement), plot the result with
 | Mode | Output | Description |
 |------|--------|-------------|
 | `annotation` | `umap_annotation.png` | Side-by-side: cluster labels + Xener annotation |
+| `overview` | `umap_overview.png` | One figure, 4 panels: cluster, `xener`, `xener_max`, `xener_refine` (unrefined cells gray) |
 | `refine --cluster-id N` | `umap_refine_cluster_N.png` | Cluster N highlighted + refined subtypes |
+
+In complete-annotation mode, run `overview` once, then `refine` for **every**
+cluster that split into >1 subtype (not a representative subset). The column
+meanings (`xener` vs `xener_max` vs `xener_refine`, and why `xener_refine` is
+empty for unrefined cells) are in `references/output-files.md`.
 
 ## Examples
 

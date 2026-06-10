@@ -14,6 +14,15 @@ publication-ready UMAP plots. Two modes:
         (left)  cells colored by cluster_key
         (right) cells colored by Xener annotation
 
+  --mode overview
+      Writes umap_overview.png with up to four panels on one figure:
+        cluster_key | xener | xener_max | xener_refine
+      This is the at-a-glance summary of the whole annotation and how it
+      sharpens left-to-right. Cells in unrefined clusters are NaN in
+      xener_refine and are drawn gray ("not refined") so the figure honestly
+      shows refinement coverage. Columns that are absent are skipped, so this
+      also works on a pre-refinement annotation CSV.
+
   --mode refine --cluster-id N
       Writes umap_refine_cluster_N.png with three panels:
         (left)   all cells colored by cluster_key, cluster N highlighted
@@ -202,6 +211,81 @@ def plot_annotation(adata, cluster_key, embedding_key, outdir):
     print(f"Saved: {out_path}")
 
 
+def _scatter_na_aware(ax, embedding, labels, title, na_label="not refined"):
+    """Like _scatter but draws missing labels (NaN) as gray `na_label` cells.
+
+    Used by the overview panel for ``xener_refine``: cells in unrefined
+    clusters are NaN there, and rendering them gray (rather than as a colored
+    "nan" category) keeps the figure honest about which cells were actually
+    split vs. left alone.
+    """
+    embedding = np.asarray(embedding)
+    is_na = labels.isna().values
+    labels = labels.fillna(na_label).astype(str)
+    cats = [c for c in sorted(labels.unique().tolist()) if c != na_label]
+    palette = _palette_for(cats)
+    color_map = dict(zip(cats, palette))
+    s = _point_size(len(labels))
+
+    if is_na.any():
+        ax.scatter(embedding[is_na, 0], embedding[is_na, 1], c="lightgray",
+                   s=s, alpha=0.35, edgecolors="none", label=na_label)
+    for cat in cats:
+        mask = (labels == cat).values & (~is_na)
+        ax.scatter(embedding[mask, 0], embedding[mask, 1], c=[color_map[cat]],
+                   s=s, alpha=0.8, edgecolors="none", label=cat)
+
+    ax.set_xlabel("UMAP_1", fontsize=11)
+    ax.set_ylabel("UMAP_2", fontsize=11)
+    ax.set_title(title, fontsize=13, pad=10)
+    ax.grid(True, alpha=0.25)
+    ax.set_aspect("equal", adjustable="datalim")
+    n_leg = len(cats) + (1 if is_na.any() else 0)
+    if n_leg <= 40:
+        ax.legend(bbox_to_anchor=(1.02, 1), loc="upper left",
+                  fontsize=7, frameon=False)
+
+
+def plot_overview(adata, cluster_key, embedding_key, outdir):
+    """Four panels on one UMAP: cluster | xener | xener_max | xener_refine.
+
+    This is the single figure that shows the whole annotation story at a
+    glance and how it sharpens left-to-right: raw clusters -> path-level
+    annotation (`xener`) -> top-weight single type (`xener_max`) -> sub-cluster
+    refinement (`xener_refine`). The refine panel draws unrefined cells gray.
+
+    Only the columns that exist are plotted, so this still works on a
+    pre-refinement annotation CSV (xener_refine simply absent).
+    """
+    embedding = adata.obsm[embedding_key]
+    panels = [(cluster_key, f"Cluster ({cluster_key})")]
+    if "xener" in adata.obs:
+        panels.append(("xener", "xener (path annotation)"))
+    if "xener_max" in adata.obs:
+        panels.append(("xener_max", "xener_max (top-weight cell type)"))
+    has_refine = "xener_refine" in adata.obs
+
+    n = len(panels) + (1 if has_refine else 0)
+    fig, axes = plt.subplots(1, n, figsize=(8.5 * n, 8))
+    if n == 1:
+        axes = [axes]
+
+    for ax, (col, title) in zip(axes, panels):
+        _scatter(ax, embedding, adata.obs[col].astype(str), title)
+    if has_refine:
+        _scatter_na_aware(
+            axes[len(panels)], embedding, adata.obs["xener_refine"],
+            "xener_refine (sub-cluster split)",
+        )
+
+    fig.suptitle("Xener annotation overview UMAP", fontsize=17, y=1.02)
+    fig.tight_layout()
+    out_path = Path(outdir) / "umap_overview.png"
+    fig.savefig(out_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved: {out_path}")
+
+
 def plot_refinement(adata, cluster_key, cluster_id, refine_key, embedding_key, outdir):
     """Three-panel: cluster highlight | xener highlight | refine within cluster."""
     embedding = adata.obsm[embedding_key]
@@ -292,8 +376,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     parser.add_argument("--input", required=True, help="Path to .h5ad file")
     parser.add_argument(
-        "--mode", required=True, choices=["annotation", "refine"],
-        help="annotation: plot Xener result; refine: plot cluster refinement",
+        "--mode", required=True, choices=["annotation", "overview", "refine"],
+        help="annotation: cluster | xener (2 panels). "
+             "overview: cluster | xener | xener_max | xener_refine (4 panels, "
+             "one figure). refine: highlight + sub-cluster split for one cluster.",
     )
     parser.add_argument(
         "--cluster-key", default="leiden",
@@ -337,6 +423,8 @@ def main():
 
     if args.mode == "annotation":
         plot_annotation(adata, args.cluster_key, args.embedding_key, outdir)
+    elif args.mode == "overview":
+        plot_overview(adata, args.cluster_key, args.embedding_key, outdir)
     else:
         if args.cluster_id is None:
             parser.error("--cluster-id is required when --mode refine")

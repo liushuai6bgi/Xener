@@ -10,15 +10,34 @@ The pipeline writes the following files to `outdir/`.
 | `gene_homolo_weight.csv` | Step 3 | Homology-mapped genes with weights |
 | `topk_markers.csv` | Step 4 | Top-k genes per cluster |
 | `celltype_weight.csv` | Step 5 | All predicted cell types per cluster |
+| `{dataset}_annotation.csv` | Pipeline | Lightweight per-cell artifact: UMAP coords + label columns (`xener`, `xener_max`, and `xener_refine` after refinement). Plotting reads this — no multi-GB h5ad needed. See "Annotation columns" below. |
 | `debug_params.yaml` | Pipeline | Actual parameters used in each step (for reproducibility) |
 | `config.yaml` | Pipeline | Copy of the input config (from `run_from_yaml` only) |
 | `annotation/cluster_{id}_gene2celltype.xml` | Step 5 | Per-cluster annotation graph |
 | `refine_suggestions.json` | `suggest_refine.py` | Suggested clusters for refinement |
 | `xener.log` | Pipeline | Mirror of xener's stdout (created by `run_pipeline.py`); consumed by `scripts/check_output.py` for the mandatory post-run quality gate |
 | `umap_annotation.png` | `plot_umap.py --mode annotation` | Side-by-side UMAP: cluster + Xener |
+| `umap_overview.png` | `plot_umap.py --mode overview` | One figure, up to 4 panels: cluster, `xener`, `xener_max`, `xener_refine` (unrefined cells gray) |
 | `umap_refine_cluster_{N}.png` | `plot_umap.py --mode refine` | UMAP highlighting cluster N + refine |
 | `refine_output/refined_{cluster_id}.csv` | `refine_cluster.py` | Refined annotation DataFrame (CSV) |
 | `refine_output/refined_{cluster_id}_gene2celltype.gexf` | `refine_cluster.py` | Gene→homolo→celltype graph (Gephi/Cytoscape/networkx) |
+
+## Annotation columns (`{dataset}_annotation.csv`)
+
+The consolidated per-cell artifact carries one row per cell and these label
+columns. They answer **different** questions — do not conflate them.
+
+| Column | Meaning |
+|--------|---------|
+| `{cluster_key}` (e.g. `leiden`) | The input cluster id for the cell. |
+| `xener` | **Path-mode annotation**: the knowledge-graph lineage *chain* for the cell's cluster, e.g. `portion of vascular tissue>phloem>companion cell`. It keeps the hierarchy, so the number of distinct `xener` labels is small (each is a path, shared by several clusters). |
+| `xener_max` | The **single highest-`init_weight` cell type on that path**, e.g. `phloem` for the path above. This is the most-supported single label when you want one node rather than a chain. `xener` and `xener_max` come from the same Step-5 result — `xener` is the path, `xener_max` is its strongest node. |
+| `xener_refine` | The **sub-cluster split result, and only that**. A cell is labeled here **iff its cluster was actually refined**; cells in unrefined clusters are left **empty (NaN)**. This is deliberate: `xener_refine` must not be read as a cluster-level label. Leaving unrefined cells empty keeps "what refinement decided" separate from "what the cluster annotation was", so a reader can always tell which cells were split. If you need a fully-populated column, coalesce explicitly: `df['xener_refine'].fillna(df['xener'])` — that keeps the choice visible instead of baking it in. |
+
+**Do not back-fill `xener_refine` from `xener`.** An empty `xener_refine` cell
+is the honest signal "this cluster was not refined". Copying the cluster label
+into it silently overstates refinement coverage (e.g. makes a 31k-of-34k
+refinement look like 34k-of-34k).
 
 ## `debug_params.yaml` structure
 

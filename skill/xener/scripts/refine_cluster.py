@@ -157,19 +157,27 @@ def write_per_cluster(cluster_id, annotation, gene2celltype_g, outdir, key_added
 def merge_into_annotation(annotation_csv, collected, key_added):
     """Merge per-cluster subtype labels into one consolidated annotation CSV.
 
-    Starts the `key_added` column from the cluster-level `xener` annotation
-    (so unrefined clusters keep their label) and overwrites per cell with the
-    refined subtype. Mirrors run_pipeline.py's merge so a single source of
-    truth holds the whole dataset - no per-cluster files needed.
+    The `key_added` column (default ``xener_refine``) holds the refinement
+    result and ONLY the refinement result: a cell gets a value here iff its
+    cluster was actually refined. Cells in unrefined clusters are left EMPTY
+    (NaN), not back-filled from `xener`.
+
+    Why empty instead of copying `xener`: `xener_refine` answers a different
+    question from `xener`. `xener` is the cluster-level annotation for every
+    cell; `xener_refine` is "what did sub-cluster splitting decide for this
+    cell". Copying the cluster label into unrefined rows conflates the two and
+    silently overstates how much of the dataset was refined - a reader can no
+    longer tell which 31k cells were split from which 3k were left alone. An
+    empty cell is the honest representation of "not refined"; downstream code
+    that wants a fully-populated label should coalesce explicitly
+    (e.g. ``adata.obs['xener_refine'].fillna(adata.obs['xener'])``), which keeps
+    the choice visible rather than baked in.
     """
+    import numpy as np
+
     ann = pd.read_csv(annotation_csv, index_col=0)
-    if "xener" in ann.columns:
-        base = ann["xener"].astype(str)
-    elif key_added in ann.columns:
-        base = ann[key_added].astype(str)
-    else:
-        base = ann.iloc[:, 0].astype(str)
-    refine_col = base.copy()
+    # Start the column as all-NaN; only refined cells receive a value.
+    refine_col = pd.Series(np.nan, index=ann.index, dtype=object)
 
     n_cells = 0
     n_clusters = 0
@@ -180,10 +188,12 @@ def merge_into_annotation(annotation_csv, collected, key_added):
         refine_col.loc[common] = annotation.loc[common, key_added].astype(str)
         n_cells += len(common)
         n_clusters += 1
-    ann[key_added] = refine_col.astype(str)
+    ann[key_added] = refine_col
     ann.to_csv(annotation_csv)
+    n_unrefined = int(ann[key_added].isna().sum())
     print(f"Merged {n_clusters} refinement(s) into '{key_added}' of "
-          f"{annotation_csv} ({n_cells} cells overwritten).")
+          f"{annotation_csv} ({n_cells} cells labeled, "
+          f"{n_unrefined} cells left empty = not refined).")
 
 
 # --------------------------------------------------------------------- #

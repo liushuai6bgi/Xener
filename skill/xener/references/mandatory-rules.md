@@ -40,6 +40,24 @@ python scripts/run_pipeline.py --config /path/to/config.yaml
 **Why**: stdin-based config passing breaks reproducibility (no record of the
 exact config used) and prevents `debug_params.yaml` from being written.
 
+## 2b. Write `config.yaml` as UTF-8, and keep comments ASCII-safe
+
+`run_pipeline.py` now reads the config as UTF-8 explicitly, so plain UTF-8
+configs are safe. But be aware of the failure this guards against: on a
+non-UTF-8 Windows console (e.g. zh-CN, default code page GBK), a tool that
+opens the file with the *platform default* encoding will raise
+`UnicodeDecodeError: 'gbk' codec can't decode byte ...` the instant a YAML
+comment contains a non-ASCII character — the classic culprit is an **em-dash
+(`—`)** or other "smart punctuation" pasted into a comment.
+
+Practical guidance when composing a config:
+- Prefer **ASCII** in comments (`-` instead of `—`, plain quotes). It is the
+  one encoding that can never trip this.
+- If you do write non-ASCII, ensure the file is saved as UTF-8.
+- If you hit a `UnicodeDecodeError` mentioning `gbk`/`cp936`, the fix is the
+  config file's bytes, not the pipeline — rewrite the offending comment as
+  ASCII and re-run.
+
 ## 3. Always confirm `model_species` and `organ` with the user
 
 Wrong values will cause pipeline failure. Before running, run:
