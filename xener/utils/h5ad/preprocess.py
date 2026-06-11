@@ -93,8 +93,9 @@ def quality_control(adata:sc.AnnData) -> sc.AnnData:
             sc.pp.log1p(raw_adata)
         adata.raw = raw_adata
     elif issparse(adata.X):
-        logger.info('set adata.raw to adata')
-        adata.raw = adata.copy()
+        # logger.info('set adata.raw to adata')
+        # adata.raw = adata.copy()
+        logger.info('skip setting adata.raw; use sparse adata.X directly to avoid large raw copies')
     return adata
 
 def process(adata:sc.AnnData, force_HVG:bool=False, n_top_genes:int=2000):
