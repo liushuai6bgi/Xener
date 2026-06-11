@@ -3,7 +3,12 @@
 **This is a mandatory step, not optional polish.** Every xener run,
 whether invoked by `run_pipeline.py` or step-by-step, MUST pass through
 the quality gate below before the run is declared "done". A run that
-produces output files but fails these checks is a failed run.
+produces output files but fails these checks is a failed run **unless the
+failure has been diagnosed as unfixable by any SOFT parameter and is caused
+by a HARD constraint (see `mandatory-rules.md` §11) — in which case it is an
+ACCEPTED failure, documented in `autonomous_log.md`, not a run to "repair" by
+changing the constraint.** The gate is a soft signal; it never outranks a
+value fixed by the data, the user, or the infrastructure.
 
 ## Why this is mandatory
 
@@ -37,9 +42,20 @@ diagnostic inline). It performs these five checks; the run is
 | 4 | Weak-confidence clusters | `celltype_weight.csv`, max per cluster | `>1 cluster with top-1 init_weight < 50` for n_cells > 200 |
 | 5 | Empty annotations | same | `>0 clusters with no celltype_weight rows` |
 
-The first three are the most important. A failure of (1) or (3) almost
-always means `model_species` is too narrow for the chosen organ -- see
-`workflows/species-selection.md` for the worked example.
+The first three are the most important. A failure of (1) or (3) is often
+`model_species` being too narrow for the chosen organ -- the **soft** fix is to
+add a closer relative that exists in the KG; see `workflows/species-selection.md`
+for the worked example.
+
+> **Before applying any fix, classify the lever (see `mandatory-rules.md` §11).**
+> The gate message says "widen model_species" and `log-interpretation.md` lists
+> "try a different organ / organ=None" — but *which* of those is legal depends
+> on what is hard vs soft. Adding a KG-present closer relative is a soft fix
+> (always allowed). Changing `organ` away from the sample's confirmed tissue, or
+> to `None`/`Unknown` purely to drop the filter, changes a HARD constraint and is
+> NOT allowed just to turn the gate green. If a high KG miss persists under the
+> correct organ after the soft levers are exhausted, ACCEPT it and document it —
+> it reflects shallow KG coverage for that (clade x organ) pair, not a config bug.
 
 ## What the gate looks like in practice
 

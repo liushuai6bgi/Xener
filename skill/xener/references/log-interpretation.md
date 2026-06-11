@@ -110,7 +110,7 @@ Each cluster logs in this fixed order:
 
 If many clusters end up `unknown`:
 
-1. **Check the decay line first** — `total X% homolos of organ[O] not in kg`. If `X > 30%`, the KG has no edges for your `model_species` + `organ`. Try a different `organ` (or `organ=None`) or expand `model_species`.
+1. **Check the decay line first** — `total X% homolos of organ[O] not in kg`. If `X > 30%`, the KG has few/no edges for your `model_species` + `organ`. **First try the SOFT fix: expand `model_species` with a closer relative that exists in the KG.** Only change `organ` (to a different tissue, or `None`) **if `organ` was an unconfirmed guess** — never to a tissue the sample is not, and never to `None`/`Unknown` purely to lift the filter when the organ is a confirmed property of the data. Changing a confirmed organ to pass this check violates `mandatory-rules.md` §11; the honest result there is an accepted gate failure under the correct organ.
 2. Check the threshold — `celltype numbers after threshold` in the line `X: Y celltypes before threshold, Z after threshold=...` tells you how aggressive the filter is. If `Z=0`, threshold is too strict.
 3. Inspect the saved `cluster_X_gene2celltype.xml` in Gephi / Cytoscape / `networkx` to see which homolos connected to which cell types.
 
@@ -140,7 +140,7 @@ pattern in column 2; if you see it, apply the fix in column 4.
 | Symptom | Grep this | Likely cause | Fix |
 |---|---|---|---|
 | Pipeline hangs after `BLASTP starting` | `BLASTP done` not seen | BLASTP is genuinely slow OR crashed silently | Wait several minutes; if `BLASTP failed` appears, you have a real error. Otherwise `kill -9` and reduce `top_num` for a smoke test. |
-| Many `KG get_gene2celltype_kg returned an empty matrix` | `returned an empty matrix` | KG has no homolo→celltype edges for your `organ` filter | Drop `organ` (set to `None`) or use a different organ; verify gene names match species conventions. |
+| Many `KG get_gene2celltype_kg returned an empty matrix` | `returned an empty matrix` | KG has no homolo→celltype edges for your `organ` filter | Verify gene names match species conventions; expand `model_species` with a KG-present relative. Drop/change `organ` ONLY if it was an unconfirmed guess — not when the organ is a confirmed tissue of the sample (see `mandatory-rules.md` §11). |
 | All `celltype=unknown` | `set to "unknown"` | Threshold too strict, or no candidates after graph propagation | Inspect the gexf file; lower `threshold`; try `mode='node'` (less aggressive than `mode='path'`). |
 | `multiple mapping detected!` warnings | `multiple mapping` | `mapping_strict=1` keeping ties across multi-copy families | Set `mapping_strict=0` or check for duplicated gene entries upstream. |
 | `top1 z-score>3 and top2<3, returning top1` for every cluster | `returning top1` | KG graph propagation is not differentiating between clusters | Verify species-homolog overlap is non-trivial; check `gene_homolo_weight.shape` is not tiny. |
@@ -148,7 +148,7 @@ pattern in column 2; if you see it, apply the fix in column 4.
 | `Checkpoint invalid (expected N gene-group combos, got M)` | `Checkpoint invalid` | `top_num` changed since last run, so cached `topk_markers.csv` no longer matches | Delete `topk_markers.csv` (and downstream) before re-running with new `top_num`. |
 | `KG HTTP <METHOD> <PATH> returned <CODE>` | `KG HTTP ... returned` | KG server is unhealthy or URL is wrong | Retry; verify `KG_url`; check upstream KG health. |
 | Pipeline takes much longer than usual | `BLASTP done in` / `KG get_gene2celltype_kg done in` | One stage has slowed down | Compare per-stage elapsed times — KG vs. BLASTP vs. `cell_annotation` — to pinpoint the bottleneck. |
-| Mean `total ... not in kg` > 30% | `not in kg` | KG coverage gap for this organ | Add the target species itself if it's a model organism, or pick a closer relative (see `workflows/species-selection.md`). |
+| Mean `total ... not in kg` > 30% | `not in kg` | KG coverage gap for this organ | Add the target species itself if it's a model organism, or pick a closer relative (see `workflows/species-selection.md`). If that soft fix barely moves the metric, the gap is the KG's shallow (clade x organ) coverage — ACCEPT the gate failure under the correct organ and document it (`mandatory-rules.md` §11); do NOT change the confirmed organ to force a pass. |
 
 ## Debug workflow (apply after a failed run)
 

@@ -200,3 +200,87 @@ is the **dominant I/O cost of the whole workflow**. Treat each read as expensive
 If you find yourself about to call `sc.read()` on the big file a second time,
 stop: the answer is almost certainly already in `inspect_h5ad.py`'s output or
 in a `*_annotation.csv` / `*.csv` already on disk.
+
+## 11. Hard constraints outrank the quality gate
+
+**A value fixed by the biology of the dataset, by the user, or by the
+available infrastructure is a HARD CONSTRAINT. The post-run quality gate
+(`check_output.py`, `self-tuning-protocol.md`) is a SOFT SIGNAL. Never change
+a hard constraint to make a soft signal pass. If the only way to pass the gate
+is to alter a hard constraint, the correct outcome is to ACCEPT the gate
+failure and document why — not to alter the constraint.**
+
+This rule is data-independent; it applies to every run.
+
+### What is hard vs soft
+
+| HARD constraint — do NOT change to pass the gate | Why it is hard |
+|---|---|
+| `organ`, once it reflects a known/confirmed tissue of the sample | Biological fact about the data |
+| `cluster_key` | What the h5ad actually contains |
+| input `non_model_h5ad` / `non_model_fasta` | The data under analysis |
+| `model_species` **phylogenetic boundary** (must be genuine relatives of the target) | Validity of homology transfer |
+| any value the **user explicitly set or confirmed** | User intent outranks the agent |
+| `model_species` / `organ` membership in the KG + BLAST DB | Infrastructure fact; an absent value cannot run |
+
+| SOFT parameter — tune these freely to improve the gate |
+|---|
+| `model_species` membership *inside* the valid boundary (how many relatives; whether to add a KG-rich close relative) |
+| BLAST thresholds: `pident`, `evalue`, `bitscore` |
+| `top_num`, `multihomolo`, `homolo_weight_key`, `marker_weight_method` |
+| `mode`, `decay_factor`, `threshold`, `ann_strict`, `mapping_strict` |
+| `candidate_annotation` (restrict the output cell-type set) |
+
+The split on `model_species` is the subtle part: *which clade* is hard (biology);
+*how many members within that clade* is soft (tuning). Adding a closer relative
+that already exists in the KG is a soft fix. Switching to a phylogenetically
+wrong species, or turning the organ filter off, is changing a hard constraint.
+
+### Protocol when the gate fails
+
+1. Identify which check failed (`self-tuning-protocol.md`) and the exact cause
+   (`log-interpretation.md`).
+2. Ask: **can a SOFT parameter fix it?** (add a valid closer relative, relax
+   BLAST thresholds, raise `top_num`, drop `threshold`, restrict
+   `candidate_annotation`, ...). If yes, do that and re-run.
+3. If the only fix would change a HARD constraint — e.g. "switch `organ` away
+   from the sample's real tissue", "set `organ=None`/`Unknown` purely to drop
+   the filter", "add a phylogenetically unrelated species just for coverage" —
+   **STOP. Do not do it.** Keep the hard constraint, accept the gate failure,
+   and write the justification to `outdir/autonomous_log.md`: which check
+   failed, which soft fixes you tried and their effect, and why no soft fix
+   exists.
+4. A gate failure that survives step 3 is an **accepted failure, not a failed
+   run.** The deliverable is the biologically-correct annotation plus the
+   documented residual gate signal — NOT a gate-green run built on a falsified
+   constraint.
+
+### The organ trap (most common instance)
+
+When check 1 (KG miss) fails, the gate message and some docs say
+"model_species too narrow for the chosen organ." Only these responses are legal:
+
+- ✅ Add a closer relative that exists in the KG (soft), OR relax BLAST, OR —
+  **only if `organ` was an unconfirmed guess** — reconsider the organ.
+- ❌ Change `organ` to a tissue the sample is NOT, or to `None`/`Unknown`
+  purely to lift the filter, **when the organ is a confirmed property of the
+  data.** A high KG miss under the *correct* organ usually means the KG is
+  simply shallow for that (clade x organ) pair — a property of the KG, not a
+  config error. The honest result is an accepted gate failure under the correct
+  organ.
+
+**Diagnostic tell:** if you applied the gate-suggested soft lever (added a
+KG-rich relative) and the metric barely moved, the bottleneck is NOT the soft
+lever — it is a hard constraint's coverage in the KG. That is your cue to
+ACCEPT, not to start changing hard constraints.
+
+### Red flags — STOP, you are about to violate this rule
+
+- "organ=None / organ=Unknown is THE FIX — it directly attacks the KG-miss check."
+- "The docs say 'try a different organ', so changing the tissue is sanctioned."
+- "A failing gate means the run isn't done; I must make it pass."
+- "I correctly diagnosed that organ is the binding lever, therefore I should change organ."
+- "Root passes the gate, so I'll annotate this stem sample against Root."
+
+All of these mean: you are trying to pass a SOFT signal by breaking a HARD
+constraint. Keep the constraint. Accept and document the gate result.
