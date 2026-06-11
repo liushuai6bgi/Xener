@@ -1,26 +1,53 @@
 #!/usr/bin/env python3
-"""Post-run quality gate for xener pipelines.
+"""Post-run quality gate for xener pipelines (BASELINE-RELATIVE).
 
 This script is invoked automatically at the end of run_pipeline.py (in-process,
-via ``run_gate()`` — no subprocess, no h5ad re-read), and can also be run
+via ``run_gate()`` -- no subprocess, no h5ad re-read), and can also be run
 standalone:
 
     python scripts/check_output.py --outdir output/edf/
+    python scripts/check_output.py --outdir output/edf_v2/ --baseline output/edf/
 
-It reads celltype_weight.csv and the run log in --outdir, computes five
-quality signals, and exits non-zero if any threshold is breached. The
-thresholds are intentionally tight: a passing run is a run whose output
-is likely to be biologically useful, not just a run that produced files.
+It reads celltype_weight.csv and the run log in --outdir and computes a small
+set of quality SIGNALS, then decides PASS/FAIL with this rule:
 
-Cluster sizes for the weak-cluster check are read from the lightweight
-``{dataset}_annotation.csv`` (auto-detected in --outdir, or pass
-``--annotation-csv``), NOT from the multi-GB h5ad — see mandatory-rules.md
-sec.10 (single inspection / I/O discipline). ``--h5ad`` remains as a legacy
-fallback only.
+    PASS = structurally sound
+           AND ( absolute targets met OR not worsened vs --baseline )
+
+In words ("improvement is enough"):
+
+  * Absolute thresholds (mean KG miss <= 30%, etc.) are **advisory targets**,
+    not hard failures. Being above a target emits a [WARN], never a [FAIL].
+  * The only HARD failures are
+      (a) STRUCTURAL breakage -- celltype_weight.csv missing/empty, no cluster
+          has annotation rows, or the run log is absent/unparseable; and
+      (b) a measured REGRESSION of a key signal versus a supplied --baseline
+          (you changed the config and made the signals worse).
+  * With no --baseline, a structurally-sound run PASSES even if it is below an
+    advisory target -- there is nothing to improve against yet. Run it again
+    with a soft-lever change and pass the first run as --baseline to prove the
+    change improved the signals.
+
+Each run writes its metrics to ``<outdir>/gate_metrics.json`` so a later run
+can be compared against it via ``--baseline <that outdir or json>``.
+
+This honours mandatory-rules.md sec.11: the intended response to weak signals is
+to tune SOFT levers (model_species -- add a KG-rich relative, even a more
+distant one; BLAST thresholds; top_num; ...) and keep the config that IMPROVES
+the signals. HARD constraints -- the sample's real ``organ``, the cluster_key,
+the input data, anything the user fixed -- are NEVER changed to move a signal.
+The gate never reads or touches ``organ``; it cannot tempt you into the organ
+trap.
+
+Cluster sizes are no longer needed (the old absolute weak-cluster check on
+``init_weight`` has been removed -- it was scale-dependent and brittle at its
+boundary). ``--annotation-csv`` / ``--h5ad`` are accepted for backward
+compatibility but unused.
 
 Skill context: this is the mandatory Step 5.5 quality gate defined in
-references/workflows/self-tuning-protocol.md. Do not declare an xener
-run done without running this and seeing it pass.
+references/workflows/self-tuning-protocol.md. Do not declare an xener run done
+without running it; a structurally-broken run, or a soft-lever change that
+regresses the signals, is still a failure.
 """
 
 import argparse
@@ -32,25 +59,23 @@ from pathlib import Path
 import pandas as pd
 
 
-# Failure thresholds. Tightened to catch the common "ran clean, output
-# garbage" failure mode where model_species is too narrow for the organ.
-THRESH_MEAN_KG_MISS = 0.30
-THRESH_TAIL_KG_MISS = 0.80
-THRESH_TAIL_KG_MISS_FRAC = 0.05
-THRESH_MIN_UNIQUE_CELLTYPES = 5
-THRESH_MIN_CLUSTERS_FOR_DIVERSITY = 10
-THRESH_WEAK_INIT_WEIGHT = 50.0
-THRESH_ALLOW_WEAK_CLUSTERS = 1
+# Advisory targets. Being above these emits a [WARN], not a [FAIL]; they are
+# goals the agent should tune SOFT levers toward, not gate-blocking thresholds.
+TARGET_MEAN_KG_MISS = 0.30
+TARGET_TAIL_KG_MISS = 0.80
+TARGET_TAIL_KG_MISS_FRAC = 0.05
+TARGET_MIN_UNIQUE_CELLTYPES = 5
+MIN_CLUSTERS_FOR_DIVERSITY = 10
+
+# A baseline comparison must move a fractional signal by more than this margin
+# to count as improvement/regression (suppresses floating-point and tie noise).
+REGRESSION_EPS_FRAC = 0.01  # 1 percentage point on miss fractions
+
+METRICS_FILENAME = "gate_metrics.json"
 
 
 def find_run_log(outdir: Path) -> Path | None:
-    """Locate the most recent xener run log in outdir.
-
-    run_pipeline.py mirrors xener's stdout to outdir/xener.log, which is
-    the primary location. Older runs may have the log elsewhere; we look
-    for the most plausible candidate in outdir first, then fall back to
-    common places.
-    """
+    """Locate the most recent xener run log in outdir."""
     candidates = [
         outdir / "xener.log",
         outdir / "run.log",
@@ -87,260 +112,241 @@ def parse_kg_miss_per_cluster(log_path: Path) -> dict[int, float]:
     return cov
 
 
-def check_kg_miss(cov: dict[int, float]) -> tuple[bool, list[str]]:
-    msgs = []
-    ok = True
-    if not cov:
-        msgs.append("[WARN] check 1+2: no KG miss data in log; "
-                    "could not parse 'total X% homolos ... not in kg' lines.")
-        return True, msgs
-    n = len(cov)
-    mean_miss = sum(cov.values()) / n
-    tail = sum(1 for v in cov.values() if v > THRESH_TAIL_KG_MISS)
-    tail_frac = tail / n
+def compute_metrics(cov: dict[int, float], ct_path: Path) -> dict:
+    """Compute the quality signals. Values are None when not computable.
 
-    msgs.append(f"[INFO] check 1+2: mean KG miss = {mean_miss:.1%}, "
-                f"clusters with >{THRESH_TAIL_KG_MISS:.0%} miss = {tail}/{n} "
-                f"({tail_frac:.1%})")
-    if mean_miss > THRESH_MEAN_KG_MISS:
+    Returns a dict with:
+      mean_kg_miss, tail_kg_miss_frac           -- coverage (from the log)
+      n_unique_top1_celltypes, n_clusters       -- diversity (from celltype_weight.csv)
+      n_clusters_with_rows                       -- structure
+    """
+    m: dict = {
+        "mean_kg_miss": None,
+        "tail_kg_miss_frac": None,
+        "n_unique_top1_celltypes": None,
+        "n_clusters": None,
+        "n_clusters_with_rows": None,
+    }
+    if cov:
+        n = len(cov)
+        m["mean_kg_miss"] = sum(cov.values()) / n
+        m["tail_kg_miss_frac"] = sum(1 for v in cov.values() if v > TARGET_TAIL_KG_MISS) / n
+    if ct_path.exists():
+        df = pd.read_csv(ct_path)
+        if {"cluster", "celltype", "init_weight"}.issubset(df.columns):
+            top1 = df.loc[df.groupby("cluster")["init_weight"].idxmax()]
+            m["n_unique_top1_celltypes"] = int(top1["celltype"].nunique())
+            m["n_clusters"] = int(top1["cluster"].nunique())
+        if "cluster" in df.columns:
+            m["n_clusters_with_rows"] = int(df["cluster"].nunique())
+    return m
+
+
+def load_baseline(baseline: str | Path | None) -> tuple[dict | None, list[str]]:
+    """Resolve --baseline (a gate_metrics.json file or an outdir holding one)."""
+    if not baseline:
+        return None, []
+    p = Path(baseline)
+    if p.is_dir():
+        p = p / METRICS_FILENAME
+    if not p.exists():
+        return None, [f"[WARN] baseline: {p} not found; comparison skipped."]
+    try:
+        return json.loads(p.read_text()), [f"[INFO] baseline: comparing against {p}"]
+    except Exception as e:  # noqa: BLE001
+        return None, [f"[WARN] baseline: could not read {p}: {e}; comparison skipped."]
+
+
+def check_structure(ct_path: Path, log_path: Path | None,
+                    cov: dict[int, float], metrics: dict) -> tuple[bool, list[str]]:
+    """Hard structural floor: the run must have produced parseable annotations."""
+    msgs: list[str] = []
+    ok = True
+    if not ct_path.exists():
+        return False, [f"[FAIL] structure: celltype_weight.csv not found at {ct_path}"]
+    if metrics["n_clusters_with_rows"] in (None, 0):
         ok = False
-        msgs.append(f"[FAIL] check 1: mean KG miss {mean_miss:.1%} "
-                    f"> {THRESH_MEAN_KG_MISS:.0%}. "
-                    "model_species likely too narrow for the chosen organ. "
-                    "See references/workflows/species-selection.md worked example.")
-    if tail_frac > THRESH_TAIL_KG_MISS_FRAC:
+        msgs.append("[FAIL] structure: no cluster has annotation rows in "
+                    "celltype_weight.csv (empty annotation).")
+    else:
+        msgs.append(f"[INFO] structure: {metrics['n_clusters_with_rows']} clusters "
+                    "have annotation rows.")
+    if not (log_path and Path(log_path).exists()):
         ok = False
-        msgs.append(f"[FAIL] check 2: {tail}/{n} clusters "
-                    f"({tail_frac:.1%}) have KG miss > "
-                    f"{THRESH_TAIL_KG_MISS:.0%} (threshold "
-                    f"{THRESH_TAIL_KG_MISS_FRAC:.0%}).")
+        msgs.append("[FAIL] structure: could not locate run log; KG-miss signal "
+                    "is unobservable. Pass --log if it lives elsewhere.")
+    elif not cov:
+        msgs.append("[WARN] structure: run log found but no 'total X% homolos ... "
+                    "not in kg' lines parsed; KG-miss signal unavailable.")
     return ok, msgs
 
 
-def check_celltype_diversity(ct_path: Path) -> tuple[bool, list[str]]:
-    msgs = []
-    if not ct_path.exists():
-        return False, [f"[FAIL] celltype_weight.csv not found at {ct_path}"]
-    df = pd.read_csv(ct_path)
-    if "cluster" not in df.columns or "celltype" not in df.columns \
-            or "init_weight" not in df.columns:
-        return False, ["[FAIL] celltype_weight.csv missing required columns "
-                       "(cluster, celltype, init_weight)"]
-    top1 = df.loc[df.groupby("cluster")["init_weight"].idxmax()]
-    n_clusters = top1["cluster"].nunique()
-    n_unique_types = top1["celltype"].nunique()
-    msgs.append(f"[INFO] check 3: {n_unique_types} unique top-1 cell types "
-                f"across {n_clusters} clusters")
-    if n_clusters > THRESH_MIN_CLUSTERS_FOR_DIVERSITY \
-            and n_unique_types < THRESH_MIN_UNIQUE_CELLTYPES:
-        return False, [f"[FAIL] check 3: only {n_unique_types} unique top-1 "
-                       f"cell types for {n_clusters} clusters "
-                       f"(expected >= {THRESH_MIN_UNIQUE_CELLTYPES}). "
-                       "model_species is too narrow or organ filter is wrong."]
-    return True, msgs
+def report_targets(metrics: dict) -> tuple[bool, list[str]]:
+    """Advisory comparison against absolute targets. Never FAILs; sets met flag."""
+    msgs: list[str] = []
+    met = True
+
+    mm = metrics["mean_kg_miss"]
+    tf = metrics["tail_kg_miss_frac"]
+    if mm is not None:
+        line = f"[INFO] signal: mean KG miss = {mm:.1%} (target <= {TARGET_MEAN_KG_MISS:.0%})"
+        if mm > TARGET_MEAN_KG_MISS:
+            met = False
+            line = (f"[WARN] signal: mean KG miss {mm:.1%} ABOVE target "
+                    f"{TARGET_MEAN_KG_MISS:.0%}. Soft fix: add a KG-rich relative to "
+                    "model_species (closest first, or a more distant well-covered "
+                    "species) and re-run with this run as --baseline. Never change a "
+                    "confirmed organ to lower it (mandatory-rules.md sec.11).")
+        msgs.append(line)
+    if tf is not None:
+        line = (f"[INFO] signal: clusters with KG miss > {TARGET_TAIL_KG_MISS:.0%} "
+                f"= {tf:.1%} (target <= {TARGET_TAIL_KG_MISS_FRAC:.0%})")
+        if tf > TARGET_TAIL_KG_MISS_FRAC:
+            met = False
+            line = (f"[WARN] signal: {tf:.1%} of clusters have severe KG miss "
+                    f"(> {TARGET_TAIL_KG_MISS:.0%}); target <= {TARGET_TAIL_KG_MISS_FRAC:.0%}.")
+        msgs.append(line)
+
+    nu = metrics["n_unique_top1_celltypes"]
+    nc = metrics["n_clusters"]
+    if nu is not None and nc is not None:
+        line = f"[INFO] signal: {nu} unique top-1 cell types across {nc} clusters"
+        if nc > MIN_CLUSTERS_FOR_DIVERSITY and nu < TARGET_MIN_UNIQUE_CELLTYPES:
+            met = False
+            line = (f"[WARN] signal: only {nu} unique top-1 cell types for {nc} "
+                    f"clusters (target >= {TARGET_MIN_UNIQUE_CELLTYPES}); model_species "
+                    "may be too narrow for the organ.")
+        msgs.append(line)
+    return met, msgs
 
 
-def cluster_sizes_from_annotation(
-    annotation_csv: Path | None, cluster_key: str | None
-) -> tuple[dict, list[str]]:
-    """Derive per-cluster cell counts from the lightweight annotation CSV.
+def compare_baseline(metrics: dict, base: dict) -> tuple[bool, bool, list[str]]:
+    """Compare current metrics to a baseline.
 
-    This is the I/O-cheap replacement for re-reading the multi-GB h5ad: the
-    `{dataset}_annotation.csv` written by run_pipeline.py carries one row per
-    cell with its cluster label, so a value_counts() of the cluster column
-    yields the exact same sizes the h5ad would (a few MB vs. ~1 GB, and it is
-    already on disk next to celltype_weight.csv). See mandatory-rules.md sec.10.
-
-    Returns (sizes_dict, messages). Keys are normalized to int where possible
-    so they match the integer cluster ids in celltype_weight.csv.
+    Returns (improved, worsened, messages). A signal counts only when present in
+    both. Fractional signals use REGRESSION_EPS_FRAC; the diversity count uses a
+    strict integer change.
     """
     msgs: list[str] = []
-    if not annotation_csv or not Path(annotation_csv).exists():
-        return {}, msgs
-    try:
-        ann = pd.read_csv(annotation_csv, index_col=0)
-    except Exception as e:
-        return {}, [f"[WARN] check 4: could not read annotation CSV "
-                    f"{annotation_csv}: {e}"]
-    # Pick the cluster column: explicit cluster_key, else first known default.
-    key = None
-    if cluster_key and cluster_key in ann.columns:
-        key = cluster_key
-    else:
-        for cand in ("leiden", "louvain", "cluster", "Cluster"):
-            if cand in ann.columns:
-                key = cand
-                break
-    if key is None:
-        return {}, [f"[WARN] check 4: no cluster column in {annotation_csv} "
-                    f"(looked for {cluster_key!r}, leiden, louvain, cluster)."]
-    counts = ann[key].astype(str).value_counts().to_dict()
-    sizes = {int(k) if str(k).isdigit() else k: int(v) for k, v in counts.items()}
-    return sizes, msgs
+    improved = False
+    worsened = False
 
+    def cmp_frac(key, label, lower_is_better=True):
+        nonlocal improved, worsened
+        cur, old = metrics.get(key), base.get(key)
+        if cur is None or old is None:
+            return
+        delta = cur - old
+        if abs(delta) <= REGRESSION_EPS_FRAC:
+            msgs.append(f"[INFO] baseline: {label} {old:.1%} -> {cur:.1%} (flat)")
+            return
+        better = (delta < 0) if lower_is_better else (delta > 0)
+        arrow = "improved" if better else "REGRESSED"
+        if better:
+            improved = True
+        else:
+            worsened = True
+        msgs.append(f"[INFO] baseline: {label} {old:.1%} -> {cur:.1%} ({arrow})")
 
-def check_weak_clusters(
-    ct_path: Path,
-    annotation_csv: Path | None = None,
-    cluster_key: str | None = None,
-    h5ad_path: Path | None = None,
-) -> tuple[bool, list[str]]:
-    msgs = []
-    df = pd.read_csv(ct_path)
-    top1 = df.loc[df.groupby("cluster")["init_weight"].idxmax()].copy()
-    top1["init_weight"] = top1["init_weight"].astype(float)
+    cmp_frac("mean_kg_miss", "mean KG miss", lower_is_better=True)
+    cmp_frac("tail_kg_miss_frac", "severe-miss cluster frac", lower_is_better=True)
 
-    # Cluster sizes come from the lightweight annotation CSV (no h5ad re-read).
-    cluster_sizes: dict = {}
-    if annotation_csv:
-        cluster_sizes, size_msgs = cluster_sizes_from_annotation(
-            annotation_csv, cluster_key
-        )
-        msgs.extend(size_msgs)
-    # Legacy fallback: only if no annotation CSV was available and an h5ad was
-    # explicitly passed (kept for standalone/back-compat use; not used by the
-    # in-process gate path).
-    if not cluster_sizes and h5ad_path and Path(h5ad_path).exists():
-        try:
-            import scanpy as sc
-            adata = sc.read(h5ad_path)
-            for key in ("leiden", "louvain", "cluster", "Cluster"):
-                if key in adata.obs.columns:
-                    cluster_sizes = (
-                        adata.obs[key].astype(str).value_counts().to_dict()
-                    )
-                    cluster_sizes = {
-                        int(k) if k.isdigit() else k: v
-                        for k, v in cluster_sizes.items()
-                    }
-                    break
-        except Exception as e:
-            msgs.append(f"[WARN] check 4: could not read h5ad for cluster "
-                        f"sizes: {e}")
-
-    weak = []
-    for _, row in top1.iterrows():
-        cid = row["cluster"]
-        try:
-            cid_int = int(cid)
-        except (ValueError, TypeError):
-            cid_int = cid
-        size = cluster_sizes.get(cid_int, 0)
-        if row["init_weight"] < THRESH_WEAK_INIT_WEIGHT and size > 200:
-            weak.append((cid, row["init_weight"], size))
-    msgs.append(f"[INFO] check 4: clusters with weak top-1 init_weight "
-                f"(< {THRESH_WEAK_INIT_WEIGHT}) and >200 cells: {len(weak)}")
-    if len(weak) > THRESH_ALLOW_WEAK_CLUSTERS:
-        msgs.append(f"[FAIL] check 4: {len(weak)} clusters have near-zero "
-                    f"confidence annotations (init_weight < "
-                    f"{THRESH_WEAK_INIT_WEIGHT}, n_cells > 200).")
-        return False, msgs
-    return True, msgs
-
-
-def check_empty_annotations(ct_path: Path) -> tuple[bool, list[str]]:
-    df = pd.read_csv(ct_path)
-    n_clusters_with_rows = df["cluster"].nunique()
-    # Heuristic: if config declared N clusters but we got far fewer, warn.
-    # Without access to config, just report.
-    return True, [f"[INFO] check 5: {n_clusters_with_rows} clusters have "
-                  "annotation rows in celltype_weight.csv"]
+    cur, old = metrics.get("n_unique_top1_celltypes"), base.get("n_unique_top1_celltypes")
+    if cur is not None and old is not None:
+        if cur > old:
+            improved = True
+            msgs.append(f"[INFO] baseline: unique top-1 types {old} -> {cur} (improved)")
+        elif cur < old:
+            worsened = True
+            msgs.append(f"[INFO] baseline: unique top-1 types {old} -> {cur} (REGRESSED)")
+        else:
+            msgs.append(f"[INFO] baseline: unique top-1 types {old} -> {cur} (flat)")
+    return improved, worsened, msgs
 
 
 def run_gate(
     outdir,
-    annotation_csv=None,
-    cluster_key=None,
+    annotation_csv=None,   # accepted for backward-compat; unused (check 4 removed)
+    cluster_key=None,      # accepted for backward-compat; unused
     log_path=None,
-    h5ad_path=None,
+    h5ad_path=None,        # accepted for backward-compat; unused
     as_json=False,
+    baseline=None,
 ):
-    """Run all five quality checks for a finished run; return (ok, results).
+    """Run the baseline-relative quality gate; return (ok, results).
 
-    This is the importable core of the gate. ``run_pipeline.py`` calls it
-    in-process right after writing the annotation artifact, so the gate adds
-    ZERO extra h5ad reads (cluster sizes come from ``annotation_csv``, a few-MB
-    CSV). The standalone ``main()`` below is a thin CLI wrapper over it.
+    PASS = structurally sound AND (absolute targets met OR not worsened vs
+    --baseline). Absolute thresholds are advisory. See the module docstring and
+    references/workflows/self-tuning-protocol.md.
 
-    Parameters
-    ----------
-    outdir : str | Path
-        Run output directory (holds celltype_weight.csv and xener.log).
-    annotation_csv : str | Path | None
-        The ``{dataset}_annotation.csv`` for cheap cluster-size lookup. If
-        omitted, auto-detected as the first ``*_annotation.csv`` in ``outdir``.
-    cluster_key : str | None
-        Cluster column name in the annotation CSV (e.g. ``leiden``).
-    log_path : str | Path | None
-        Run log; auto-detected in ``outdir`` if omitted.
-    h5ad_path : str | Path | None
-        Legacy fallback for cluster sizes only when no annotation CSV exists.
-
-    Returns
-    -------
-    (overall_ok: bool, results: dict)
+    Always writes ``<outdir>/gate_metrics.json`` so a later run can pass this
+    one as ``--baseline``.
     """
     outdir = Path(outdir)
     log_path = Path(log_path) if log_path else find_run_log(outdir)
     ct_path = outdir / "celltype_weight.csv"
 
-    # Auto-detect the annotation CSV in outdir when not supplied.
-    if annotation_csv is None:
-        cands = sorted(outdir.glob("*_annotation.csv"))
-        annotation_csv = cands[0] if cands else None
-    annotation_csv = Path(annotation_csv) if annotation_csv else None
-    h5ad_path = Path(h5ad_path) if h5ad_path else None
+    cov = (parse_kg_miss_per_cluster(Path(log_path))
+           if log_path and Path(log_path).exists() else {})
+    metrics = compute_metrics(cov, ct_path)
 
-    results = {}
-    overall_ok = True
+    # Persist metrics for use as a future baseline (best-effort).
+    try:
+        (outdir / METRICS_FILENAME).write_text(json.dumps(metrics, indent=2))
+    except Exception:  # noqa: BLE001
+        pass
 
-    # Check 1+2: KG miss (parsed from the run log)
-    if log_path and Path(log_path).exists():
-        cov = parse_kg_miss_per_cluster(Path(log_path))
-        ok, msgs = check_kg_miss(cov)
-        results["kg_miss"] = {
-            "per_cluster": {str(k): v for k, v in cov.items()},
-            "messages": msgs,
-            "ok": ok,
-        }
-        overall_ok = overall_ok and ok
-    else:
-        results["kg_miss"] = {
-            "ok": False,
-            "messages": [f"[FAIL] could not locate run log in {outdir}. "
-                         "Pass --log explicitly if the log is elsewhere."],
-        }
+    structure_ok, struct_msgs = check_structure(ct_path, log_path, cov, metrics)
+    met_targets, target_msgs = report_targets(metrics)
+
+    base, base_load_msgs = load_baseline(baseline)
+    improved = worsened = False
+    cmp_msgs: list[str] = []
+    if base is not None:
+        improved, worsened, cmp_msgs = compare_baseline(metrics, base)
+
+    # Decision: structural floor first, then improvement-is-enough.
+    if not structure_ok:
         overall_ok = False
+        verdict = "FAILED (structural breakage)"
+    elif met_targets:
+        overall_ok = True
+        verdict = "PASSED (absolute targets met)"
+    elif base is not None and worsened:
+        overall_ok = False
+        verdict = "FAILED (regression vs baseline)"
+    elif base is not None:
+        overall_ok = True
+        verdict = ("PASSED (improved vs baseline)" if improved
+                   else "PASSED (held vs baseline; below target but not worsened)")
+    else:
+        overall_ok = True
+        verdict = ("PASSED (below target; no baseline to judge improvement -- "
+                   "re-run with a soft-lever change and --baseline to confirm a gain)")
 
-    # Check 3: cell-type diversity
-    ok, msgs = check_celltype_diversity(ct_path)
-    results["celltype_diversity"] = {"messages": msgs, "ok": ok}
-    overall_ok = overall_ok and ok
+    results = {
+        "metrics": metrics,
+        "per_cluster_kg_miss": {str(k): v for k, v in cov.items()},
+        "met_targets": met_targets,
+        "improved_vs_baseline": improved,
+        "worsened_vs_baseline": worsened,
+        "ok": overall_ok,
+        "verdict": verdict,
+        "messages": struct_msgs + target_msgs + base_load_msgs + cmp_msgs,
+    }
 
-    # Check 4: weak clusters (sizes from annotation CSV, NOT the h5ad)
-    ok, msgs = check_weak_clusters(ct_path, annotation_csv, cluster_key, h5ad_path)
-    results["weak_clusters"] = {"messages": msgs, "ok": ok}
-    overall_ok = overall_ok and ok
-
-    # Check 5: empty annotations
-    ok, msgs = check_empty_annotations(ct_path)
-    results["empty_annotations"] = {"messages": msgs, "ok": ok}
-    overall_ok = overall_ok and ok
-
-    # Emit results (shared by the in-process and CLI callers).
     if as_json:
         print(json.dumps(results, indent=2))
     else:
-        for section in ("kg_miss", "celltype_diversity", "weak_clusters",
-                        "empty_annotations"):
-            for m in results[section]["messages"]:
-                print(m)
+        for m in results["messages"]:
+            print(m)
         print()
-        if overall_ok:
-            print("Quality gate PASSED.")
-        else:
-            print("Quality gate FAILED. Re-run with adjusted config "
-                  "(typically widen model_species).")
+        print(f"Quality gate {'PASSED' if overall_ok else 'FAILED'}: {verdict}.")
+        if not overall_ok:
+            print("Fix: if structural, inspect the pipeline output/log. If a "
+                  "regression, revert the soft-lever change. Never change a HARD "
+                  "constraint (organ, cluster_key, inputs) to move a signal "
+                  "(mandatory-rules.md sec.11).")
 
     return overall_ok, results
 
@@ -349,19 +355,20 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--outdir", required=True, help="xener output directory")
+    ap.add_argument("--baseline", default=None,
+                    help="A prior run's gate_metrics.json (or its outdir) to "
+                         "compare against. With a baseline, a structurally-sound "
+                         "run that improved or held its signals PASSES even below "
+                         "target; a run that regressed FAILS.")
     ap.add_argument("--log", default=None,
                     help="Path to run log (auto-detected if omitted)")
     ap.add_argument("--annotation-csv", default=None,
-                    help="Lightweight {dataset}_annotation.csv for cluster "
-                         "sizes (auto-detected in --outdir if omitted). "
-                         "Preferred over --h5ad: avoids re-reading the h5ad.")
+                    help="Accepted for backward compatibility; unused.")
     ap.add_argument("--cluster-key", default=None,
-                    help="Cluster column name in the annotation CSV (e.g. leiden)")
+                    help="Accepted for backward compatibility; unused.")
     ap.add_argument("--h5ad", default=None,
-                    help="LEGACY fallback for cluster sizes, used only when no "
-                         "annotation CSV is available. Prefer --annotation-csv.")
-    ap.add_argument("--json", action="store_true",
-                    help="Emit results as JSON")
+                    help="Accepted for backward compatibility; unused.")
+    ap.add_argument("--json", action="store_true", help="Emit results as JSON")
     args = ap.parse_args()
 
     outdir = Path(args.outdir)
@@ -376,6 +383,7 @@ def main():
         log_path=args.log,
         h5ad_path=args.h5ad,
         as_json=args.json,
+        baseline=args.baseline,
     )
     sys.exit(0 if overall_ok else 1)
 

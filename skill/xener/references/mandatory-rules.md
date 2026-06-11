@@ -205,10 +205,13 @@ in a `*_annotation.csv` / `*.csv` already on disk.
 
 **A value fixed by the biology of the dataset, by the user, or by the
 available infrastructure is a HARD CONSTRAINT. The post-run quality gate
-(`check_output.py`, `self-tuning-protocol.md`) is a SOFT SIGNAL. Never change
-a hard constraint to make a soft signal pass. If the only way to pass the gate
-is to alter a hard constraint, the correct outcome is to ACCEPT the gate
-failure and document why — not to alter the constraint.**
+(`check_output.py`, `self-tuning-protocol.md`) is a SOFT SIGNAL — and it is now
+baseline-relative: it never hard-fails a run for being above an advisory target,
+only for structural breakage or a regression vs a baseline. Never change a hard
+constraint to move a soft signal. Tune SOFT levers to improve the signals; if,
+after the best soft-lever choice, a signal is still above target under the
+correct hard constraints, that is a documented PASS, not something to "fix" by
+falsifying a constraint.**
 
 This rule is data-independent; it applies to every run.
 
@@ -246,57 +249,68 @@ constraint — turning the `organ` filter off, or moving `organ` to a tissue the
 sample is not. Adding a well-covered distant species is a legal soft fix;
 changing the confirmed organ is not.
 
-### Protocol when the gate fails
+### Protocol when a signal is above target (or the gate fails)
 
-1. Identify which check failed (`self-tuning-protocol.md`) and the exact cause
+The gate is baseline-relative ("improvement is enough"). A `[WARN]` (above an
+advisory target) is **not** a failure — it is a prompt to tune soft levers.
+
+1. Read the WARN (`self-tuning-protocol.md`) and the exact cause
    (`log-interpretation.md`).
-2. Ask: **can a SOFT parameter fix it?** (add a KG-present relative — closest
-   first, or a more distant but well-covered species to rescue KG coverage;
-   relax BLAST thresholds; raise `top_num`; drop `threshold`; restrict
-   `candidate_annotation`; ...). If yes, do that and re-run.
-3. If the only fix would change a HARD constraint — e.g. "switch `organ` away
-   from the sample's real tissue", "set `organ=None`/`Unknown` purely to drop
-   the filter" — **STOP. Do not do it.** Keep the hard constraint, accept the
-   gate failure, and write the justification to `outdir/autonomous_log.md`:
-   which check failed, which soft fixes you tried (including which species you
-   added and from how far out) and their effect, and why no soft fix exists.
-   Adding a phylogenetically distant species is a SOFT fix, not a hard-constraint
-   change — so reaching this step means even distant, KG-rich species did not
-   help, which points the finger at organ-level KG depth, not at the species set.
-4. A gate failure that survives step 3 is an **accepted failure, not a failed
-   run.** The deliverable is the biologically-correct annotation plus the
-   documented residual gate signal — NOT a gate-green run built on a falsified
-   constraint.
+2. Apply a SOFT lever to improve the signal: add a KG-present relative —
+   closest first, or a more distant but well-covered species to rescue KG
+   coverage; relax BLAST thresholds; raise `top_num`; drop `threshold`;
+   restrict `candidate_annotation`; ... Then **re-run with the previous run's
+   outdir as `--baseline`.**
+3. Read the baseline comparison:
+   - **Improved or held** → the gate PASSES. Adopt the new config. (This is the
+     common case: an added KG-rich species that lowers KG miss, even if still
+     above 30%, is a legitimate, gate-passing improvement.)
+   - **Regressed** → the gate FAILS. Revert the change; the lever hurt.
+4. **Never** reach for a HARD constraint to move the signal — e.g. "switch
+   `organ` away from the sample's real tissue", "set `organ=None`/`Unknown`
+   purely to drop the filter". STOP. Keep the hard constraint.
+5. If, after the best available soft-lever choice (closest relatives *plus* the
+   most KG-rich distant species), the signal is still above target but did not
+   regress, the run **PASSES under the correct organ**. Document in
+   `outdir/autonomous_log.md`: the residual signal, the species you added and
+   from how far out, the measured effect, and that the residual reflects shallow
+   KG coverage for that organ (a KG property), not a config bug.
 
 ### The organ trap (most common instance)
 
-When check 1 (KG miss) fails, the gate message and some docs say
-"model_species too narrow for the chosen organ." Only these responses are legal:
+When mean KG miss is above target (a `[WARN]`), the message says "model_species
+too narrow for the chosen organ." Only these responses are legal:
 
 - ✅ Add a KG-present relative (soft) — closest first, but a **more distant,
   well-covered species is also a legal soft addition** when close relatives are
   missing or KG-shallow (keep the close ones too); OR relax BLAST; OR — **only
-  if `organ` was an unconfirmed guess** — reconsider the organ.
+  if `organ` was an unconfirmed guess** — reconsider the organ. Re-run with a
+  `--baseline` and keep the change if it improved or held.
 - ❌ Change `organ` to a tissue the sample is NOT, or to `None`/`Unknown`
   purely to lift the filter, **when the organ is a confirmed property of the
   data.** A high KG miss that persists even after you have added the best
   available species (close *and* distant well-covered) usually means the KG is
   simply shallow for that organ — a property of the KG, not a config error. The
-  honest result is an accepted gate failure under the correct organ.
+  honest result is a **PASS under the correct organ** with a documented residual
+  WARN — never a gate "rescued" by switching to Root/None.
 
 **Diagnostic tell:** if you applied the species soft lever to its limit —
 closest relatives *plus* the most KG-rich distant species available — and the
 metric barely moved, the bottleneck is NOT the species set; it is the organ's
-coverage depth in the KG (a hard fact). That is your cue to ACCEPT, not to start
-changing the confirmed organ.
+coverage depth in the KG (a hard fact). Keep whichever soft-lever config scored
+best (the gate passes it as an improvement/hold vs baseline), document the
+residual, and do NOT start changing the confirmed organ. "Barely moved" still
+means *moved in the right direction* → keep it; only a *regression* is a reason
+to revert.
 
 ### Red flags — STOP, you are about to violate this rule
 
-- "organ=None / organ=Unknown is THE FIX — it directly attacks the KG-miss check."
+- "organ=None / organ=Unknown is THE FIX — it directly attacks the KG-miss WARN."
 - "The docs say 'try a different organ', so changing the tissue is sanctioned."
-- "A failing gate means the run isn't done; I must make it pass."
+- "The signal is above target, so the run isn't done; I must hit 30% somehow."
+  (No — above-target is advisory; improving-or-holding vs baseline PASSES.)
 - "I correctly diagnosed that organ is the binding lever, therefore I should change organ."
 - "Root passes the gate, so I'll annotate this stem sample against Root."
 
-All of these mean: you are trying to pass a SOFT signal by breaking a HARD
-constraint. Keep the constraint. Accept and document the gate result.
+All of these mean: you are trying to move a SOFT signal by breaking a HARD
+constraint. Keep the constraint. Improve via soft levers and document the result.

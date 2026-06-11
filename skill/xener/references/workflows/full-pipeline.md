@@ -30,10 +30,14 @@ python scripts/run_pipeline.py --config config.yaml
 4. **Step 4** — Top-k genes (default 30) are selected per cluster
 5. **Step 5** — Knowledge-graph propagation predicts cell types
 6. **Step 5.5** — The mandatory **quality gate runs in-process** (no
-   subprocess, no h5ad re-read): cluster sizes for the weak-cluster check come
-   from the lightweight `{dataset}_annotation.csv` the pipeline just wrote. If
-   the gate fails, the pipeline exits non-zero — diagnose (usually widen
-   `model_species`) and re-run from Step 3. See `self-tuning-protocol.md`.
+   subprocess, no h5ad re-read). It is **baseline-relative**: it hard-fails
+   (pipeline exits non-zero) only on *structural breakage* or a *regression vs
+   `--baseline`*. Being above an advisory target (e.g. mean KG miss > 30%) is a
+   `[WARN]`, not a failure. To improve a WARN, add a KG-rich relative to
+   `model_species` and re-run passing the previous outdir as `--baseline`
+   (`run_pipeline.py --baseline <prev_outdir>`); keep the change if signals
+   improved or held. Never change the confirmed `organ` to move a signal. See
+   `self-tuning-protocol.md`.
 
 All intermediates are saved as `.csv` files in `outdir/`. The final
 `debug_params.yaml` records every parameter actually used.

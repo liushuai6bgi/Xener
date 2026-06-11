@@ -1,117 +1,131 @@
-# Post-Run Quality Gate (REQUIRED)
+# Post-Run Quality Gate (REQUIRED) — baseline-relative
 
-**This is a mandatory step, not optional polish.** Every xener run,
-whether invoked by `run_pipeline.py` or step-by-step, MUST pass through
-the quality gate below before the run is declared "done". A run that
-produces output files but fails these checks is a failed run **unless the
-failure has been diagnosed as unfixable by any SOFT parameter and is caused
-by a HARD constraint (see `mandatory-rules.md` §11) — in which case it is an
-ACCEPTED failure, documented in `autonomous_log.md`, not a run to "repair" by
-changing the constraint.** The gate is a soft signal; it never outranks a
-value fixed by the data, the user, or the infrastructure.
+**This is a mandatory step, not optional polish.** Every xener run, whether
+invoked by `run_pipeline.py` or step-by-step, MUST pass through the quality
+gate before the run is declared "done".
 
-## Why this is mandatory
+The gate is **baseline-relative** ("improvement is enough"). It does **not**
+hard-fail a run merely for being above an absolute threshold. Its rule is:
 
-A run can complete with exit code 0 and still produce biologically
-useless annotations:
+```
+PASS = structurally sound
+       AND ( absolute targets met OR not worsened vs --baseline )
+```
 
-- The pipeline writes `celltype_weight.csv`, but the KG may have had
-  no edges for the chosen model_species + organ combination, so most
-  cell types are "unknown" or the same label is repeated.
-- The pipeline writes `gene_homolo_weight.csv`, but BLAST was too
-  stringent (or pointed at a species with poor annotation depth), so
-  few homologs survived.
-- `init_weight` may look "high" for some clusters simply because a
-  few genes voted overwhelmingly, while 70%+ of marker genes had no
-  KG entry at all.
+- **Absolute targets** (mean KG miss ≤ 30%, severe-miss tail ≤ 5%, ≥ 5 unique
+  top-1 cell types) are **advisory**. Being above a target prints a `[WARN]`,
+  never a `[FAIL]`. They are goals you tune SOFT levers toward, not blockers.
+- The only **HARD failures** are:
+  1. **Structural breakage** — `celltype_weight.csv` missing/empty, no cluster
+     has annotation rows, or the run log is absent/unparseable.
+  2. **Regression vs `--baseline`** — you changed the config and a key signal
+     got measurably worse (mean KG miss or severe-miss tail up by > 1pp, or
+     unique top-1 types down).
+- With **no `--baseline`**, a structurally-sound run PASSES even below target —
+  there is nothing yet to improve against. To *prove* a soft-lever change
+  helped, re-run with the previous run's outdir as `--baseline`.
 
-The signals for all of these are already in the run log and the
-output zips. The agent must read them, not skip them.
+> **The old absolute weak-cluster check on `init_weight` (`< 50` for n_cells >
+> 200) has been REMOVED.** It was scale-dependent (`init_weight` is an
+> unnormalized sum that ranged ~14 to ~1280 across clusters in one real
+> dataset) and brittle at its boundary (a cluster at 50.5 flipping to 49.8 from
+> a trivial perturbation). Confidence is now judged *relatively* (did a
+> soft-lever change improve the signals?), not by an absolute cutoff. Note:
+> `init_weight` is **still** used for *refinement* eligibility (top-2 ratio);
+> that is a different, scale-invariant ratio and is unaffected.
 
-## Required checks (must run after Step 5)
+## Why a gate at all
 
-Run `scripts/check_output.py --outdir <outdir>` (or read the
-diagnostic inline). It performs these five checks; the run is
-**failed** if any threshold is breached.
+A run can complete with exit code 0 and still produce biologically useless
+annotations — most often because the KG had few edges for the chosen
+`model_species` + `organ`, so homologs map to nothing and weights are thin.
+The gate surfaces that as a `[WARN]` and, crucially, lets you **measure whether
+a fix helped** by comparing against a baseline.
 
-| # | Signal | Source | Failure threshold |
-|---|--------|--------|-------------------|
-| 1 | Mean KG miss rate (per cluster) | `total X% homolos of organ[...] not in kg` in the run log | `mean > 0.30` |
-| 2 | Tail of clusters with severe KG miss | same | `>5% of clusters with miss > 0.80` |
-| 3 | Unique top-1 cell types across clusters | `celltype_weight.csv`, top-1 per cluster | `<5 unique types for >10 clusters` |
-| 4 | Weak-confidence clusters | `celltype_weight.csv`, max per cluster | `>1 cluster with top-1 init_weight < 50` for n_cells > 200 |
-| 5 | Empty annotations | same | `>0 clusters with no celltype_weight rows` |
+## Signals the gate computes
 
-The first three are the most important. A failure of (1) or (3) is often
-`model_species` being too narrow for the chosen organ -- the **soft** fix is to
-add a relative that exists in the KG (closest first, or a more distant but
-well-covered species to rescue coverage); see `workflows/species-selection.md`
-for the worked example.
+Run `scripts/check_output.py --outdir <outdir> [--baseline <prev_outdir>]`
+(or let `run_pipeline.py` call it in-process).
 
-> **Before applying any fix, classify the lever (see `mandatory-rules.md` §11).**
-> The gate message says "widen model_species" and `log-interpretation.md` lists
-> "try a different organ / organ=None" — but *which* of those is legal depends
-> on what is hard vs soft. Adding any KG-present species is a soft fix (always
-> allowed) — closest relatives first, or a more distant, well-covered species
-> when the close ones are missing or KG-shallow; `model_species` has no hard
-> phylogenetic boundary. Changing `organ` away from the sample's confirmed
-> tissue, or to `None`/`Unknown` purely to drop the filter, changes a HARD
-> constraint and is NOT allowed just to turn the gate green. If a high KG miss
-> persists under the correct organ after the species lever is exhausted (close
-> *and* distant well-covered species tried), ACCEPT it and document it — it
-> reflects shallow KG coverage for that organ, not a config bug.
+| Signal | Source | Advisory target | Role |
+|--------|--------|-----------------|------|
+| Mean KG miss (per cluster) | `total X% homolos of organ[...] not in kg` in the log | ≤ 0.30 | primary, comparable |
+| Severe-miss tail | same | ≤ 5% of clusters > 0.80 | comparable |
+| Unique top-1 cell types | `celltype_weight.csv` | ≥ 5 (when > 10 clusters) | comparable |
+| Annotation rows present | `celltype_weight.csv` | every cluster | **structural floor** |
+
+Each run writes these to `<outdir>/gate_metrics.json` so a later run can be
+compared against it.
+
+## The intended response to a `[WARN]` (mandatory-rules.md §11)
+
+A high mean KG miss is almost always `model_species` being too narrow / shallow
+for the organ. The fix is a **SOFT lever**, and the gate now *rewards* it:
+
+1. **Add a KG-present relative to `model_species`** — closest first; or, when
+   close relatives are absent or KG-shallow for the organ, a **more distant but
+   well-covered species** (e.g. Arabidopsis for a plant stem). `model_species`
+   has no hard phylogenetic boundary. Keep the close relatives in the list.
+2. Re-run from Step 3 (reuse `marker_gene.csv` / `marker_weight.csv`), passing
+   the **previous run's outdir as `--baseline`**.
+3. If the signal **improved (or held)** → the gate PASSES; adopt the new
+   config. If it **regressed** → the gate FAILS; revert.
+
+Other soft levers: relax BLAST (`pident`/`evalue`/`bitscore`), raise `top_num`,
+adjust `threshold`/`decay_factor`/`mode`, restrict `candidate_annotation`.
+
+> **The HARD constraints are never touched to move a signal.** The gate does
+> not read `organ` and cannot be passed by changing it. Switching a stem sample
+> to Root, or to `None`/`Unknown` just to drop the filter, is the **organ
+> trap** — forbidden by `mandatory-rules.md` §11 even though it would lower KG
+> miss. If, after adding the best available species (close *and* distant
+> well-covered), the mean KG miss is still above target but did not regress, the
+> run **PASSES** under the correct organ; the residual is shallow KG coverage
+> for that organ, documented in `autonomous_log.md`, not a config bug to chase.
 
 ## What the gate looks like in practice
 
 ```bash
-$ python scripts/check_output.py --outdir output/edf/
+# First run (no baseline): structurally sound, below target -> PASS (advisory).
+$ python scripts/check_output.py --outdir output/edf_v1/
+[INFO] structure: 36 clusters have annotation rows.
+[WARN] signal: mean KG miss 47.4% ABOVE target 30%. Soft fix: add a KG-rich
+       relative to model_species ... Never change a confirmed organ (§11).
+[INFO] signal: 3 unique top-1 cell types across 36 clusters
+Quality gate PASSED: PASSED (below target; no baseline to judge improvement).
 
-[FAIL] check 1: mean KG miss 47.4% > 30%
-        -> model_species too narrow for organ[Root].
-        -> add target species itself (if it's a model organism)
-           or a more well-annotated close relative.
-[FAIL] check 3: only 3 unique top-1 cell types for 36 clusters
-        -> expected 8-15+ for a root tip atlas.
-        -> see species-selection.md worked example.
-
-Quality gate FAILED. Re-run with adjusted config.
-exit 1
+# Re-run after adding a KG-rich species, compared to the first run.
+$ python scripts/check_output.py --outdir output/edf_v2/ --baseline output/edf_v1/
+[INFO] baseline: mean KG miss 47.4% -> 31.2% (improved)
+[INFO] baseline: unique top-1 types 3 -> 9 (improved)
+Quality gate PASSED: PASSED (improved vs baseline).
 ```
 
 ## Automatic invocation
 
-`run_pipeline.py` calls `check_output.py` automatically at the end.
-If the gate fails, the pipeline exits non-zero and the agent must
-adjust the config (most commonly `model_species`) and re-run from
-Step 3 (re-using `marker_gene.csv` and `marker_weight.csv` from
-the first run, since those don't depend on the BLAST database).
+`run_pipeline.py` calls the gate at the end, in-process. Pass `--baseline
+<prev_outdir>` to `run_pipeline.py` to forward it to the gate. The pipeline
+exits non-zero only on a **structural** failure or a **regression** vs the
+baseline — not for being above an advisory target.
 
-## Manual re-run shortcut
+## Manual re-run shortcut (improve, then compare)
 
 ```bash
-# Re-run only step 3-5 with new model_species, reusing earlier outputs:
-python scripts/step3_mapping.py \
-    --input output/edf/marker_weight.csv \
-    --fasta abc.fasta \
-    --species Arabidopsis_thaliana Brassica_rapa \
-    --pident 60 --evalue 0.05 --bitscore 200 \
-    --multihomolo \
-    --outdir output/edf/
+# v1 (baseline): closest relatives only.
+python scripts/run_pipeline.py --config config_v1.yaml --init-config init.yaml
 
-python scripts/step4_topk.py --input output/edf/gene_homolo_weight.csv \
-    --top-num 20 --multihomolo --outdir output/edf/
-
-python scripts/step5_annotate.py --input output/edf/topk_markers.csv \
-    --organ Root --threshold null --mode path --decay-factor 0.7 \
-    --outdir output/edf/
-
-python scripts/check_output.py --outdir output/edf/   # must pass
+# v2: add a KG-rich (possibly distant) species, compare to v1.
+python scripts/run_pipeline.py --config config_v2.yaml --init-config init.yaml \
+    --baseline output/edf_v1
+# Gate PASSES iff v2 improved-or-held vs v1 (and is structurally sound).
 ```
+
+Or run the steps individually (reuse `marker_weight.csv`) and call
+`check_output.py --outdir output/edf_v2 --baseline output/edf_v1` at the end.
 
 ## Legacy "self-tuning" guidance
 
-The original self-tuning heuristics (e.g., "if median init_weight
-< 0.3, re-run with --threshold null --decay-factor 0.5") still
-apply **as second-line adjustments** after the post-run gate has
-identified a real problem. They are no longer the primary
-diagnostic -- the gate above is.
+The original heuristics (e.g. "if median init_weight is low, re-run with
+`--threshold null --decay-factor 0.5`") still apply as **second-line soft-lever
+adjustments**. Apply one, re-run with the prior run as `--baseline`, and keep
+the change only if the gate confirms the signals improved or held.

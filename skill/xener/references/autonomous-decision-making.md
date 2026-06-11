@@ -109,16 +109,28 @@ of this dataset" is not a demo request.
   the lightweight `{dataset}_annotation.csv` instead. See `mandatory-rules.md`
   §10.
 
-## Self-tuning loop (optional but recommended)
+## Self-tuning loop (baseline-relative — recommended)
 
-After the initial run, the agent can:
-1. Read `celltype_weight.csv` and check distribution of `init_weight`.
-2. If median < 0.3 → annotations are weak. Re-run step 5 with
-   `--threshold null --decay-factor 0.5` to widen the search.
-3. If multiple clusters share the same top cell type → re-run step 5
-   with `--ann-strict 1` to disambiguate.
-4. If `gene_homolo_weight.csv` has very few rows → relax BLAST
-   thresholds and re-run from step 3.
+The quality gate is **baseline-relative**: above-target signals are advisory
+`[WARN]`s, not failures, and the way to act on them is to make a soft-lever
+change and **prove it improved the signals against a baseline**. So the loop is:
 
-Document each re-run decision in `outdir/autonomous_log.md` for
-reproducibility.
+1. Run once (no baseline). Note the gate's signals (mean KG miss, unique top-1
+   types) and that it wrote `outdir/gate_metrics.json`.
+2. Pick **one** soft lever to try, most-impactful first:
+   - mean KG miss high → add a KG-present relative to `model_species` (closest
+     first, or a more distant well-covered species); or relax BLAST thresholds.
+   - many clusters share one top type → `--ann-strict 1`.
+   - very few `gene_homolo_weight.csv` rows → relax BLAST and re-run from step 3.
+   - weak weights overall → `--threshold null --decay-factor 0.5`.
+3. Re-run into a **new outdir**, passing the previous run as `--baseline`
+   (`run_pipeline.py --baseline <prev_outdir>`, or `check_output.py --outdir
+   <new> --baseline <prev>`).
+4. **Improved or held** → keep the new config. **Regressed** → revert and try a
+   different lever. Repeat until no soft lever improves the signals further.
+5. Never move a signal by changing a HARD constraint (the confirmed `organ`,
+   `cluster_key`, inputs). A residual above-target signal under the correct
+   organ is a documented PASS, not a failure (`mandatory-rules.md` §11).
+
+Document each re-run decision (lever, baseline, measured effect, keep/revert) in
+`outdir/autonomous_log.md` for reproducibility.

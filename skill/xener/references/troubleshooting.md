@@ -138,10 +138,13 @@ output. In that case, **do not re-run blindly** — diagnose first.
    log-driven debug protocol. The xener logger emits a small fixed
    set of strings; you can `grep` them.
 2. **Run the post-run quality gate** explicitly:
-   `python scripts/check_output.py --outdir <outdir>`. It catches
-   the five most common silent failures (mean KG miss, tail of
-   severe miss, too-few unique top-1 cell types, weak-confidence
-   clusters, empty annotations).
+   `python scripts/check_output.py --outdir <outdir> [--baseline <prev_outdir>]`.
+   It reports the quality signals (mean KG miss, severe-miss tail, unique top-1
+   cell types) as advisory targets and hard-fails only on structural breakage or
+   a regression vs `--baseline`. Above-target signals are `[WARN]`s — improve
+   them with a soft lever and re-run against a baseline. (The old absolute
+   weak-cluster `init_weight < 50` check was removed; see
+   `workflows/self-tuning-protocol.md`.)
 3. **Grep pipeline landmarks**:
    ```bash
    grep -E '>>>|ERROR|WARNING|Traceback' outdir/xener.log

@@ -37,6 +37,16 @@ def main():
              "KG + bundled BLAST database. See "
              "references/workflows/initialization.md.",
     )
+    parser.add_argument(
+        "--baseline", default=None, metavar="OUTDIR_OR_JSON",
+        help="A prior run's outdir (or its gate_metrics.json) to compare the "
+             "post-run quality gate against. The gate is baseline-relative: a "
+             "structurally-sound run that improved or held its signals PASSES "
+             "even below the advisory targets; a run that regressed FAILS. Omit "
+             "on the first run, then pass that run's outdir here when you re-run "
+             "with a soft-lever change (e.g. an added model_species). See "
+             "references/workflows/self-tuning-protocol.md.",
+    )
     args = parser.parse_args()
 
     # Read the config as UTF-8 explicitly. Without an explicit encoding,
@@ -174,14 +184,17 @@ def main():
 
     # Mandatory post-run quality gate. Run IN-PROCESS (no subprocess, no extra
     # h5ad read): cluster sizes come from the annotation CSV written just above.
-    # If this fails, the pipeline exits non-zero and the run is not considered
-    # successful. The agent must inspect the gate output, adjust the config
-    # (most commonly model_species), and re-run from step 3.
+    # The gate is BASELINE-RELATIVE (see self-tuning-protocol.md): it only
+    # hard-fails on structural breakage, or on a measured regression vs
+    # --baseline. Absolute thresholds (KG miss, diversity) are advisory. So a
+    # first run below target still PASSES; to prove a soft-lever change helped,
+    # re-run with the previous outdir as --baseline.
     from check_output import run_gate
     ok, _ = run_gate(
         outdir=config["outdir"],
         annotation_csv=annot_path,            # None if the artifact write failed
         cluster_key=config.get("cluster_key"),
+        baseline=args.baseline,
     )
     if not ok:
         sys.exit(1)

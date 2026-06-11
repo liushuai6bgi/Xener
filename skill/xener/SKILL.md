@@ -67,24 +67,24 @@ and heuristics. The high-level flow is:
    propose 1-3 candidates with reasoning, not open-ended questions
 5. **Run** the pipeline (`workflows/full-pipeline.md`)
 6. **Run the mandatory post-run quality gate** (`scripts/check_output.py`,
-   invoked automatically by `run_pipeline.py`). If it fails, the
-   pipeline exits non-zero. The agent must diagnose the failure
-   (typically: widen `model_species` to include the target species
-   itself when it is a model organism) and re-run from Step 3.
-   See `workflows/self-tuning-protocol.md` for the gate logic and
-   `workflows/species-selection.md` for the most common fix. When
-   the gate fails, **also consult `references/log-interpretation.md`**
-   for the stage-by-stage grep-driven diagnosis — the gate identifies
-   the class of failure, the log reference identifies the exact
-   failure inside the class. **CRITICAL: the gate is a SOFT signal and
-   never outranks a HARD constraint (the sample's real `organ`, anything
-   the user fixed). Only fix the gate with SOFT parameters — `model_species`
-   is one of them: there is no hard phylogenetic boundary, so adding a more
-   distant but KG-rich species to rescue coverage is a legal soft fix. If the
-   sole way to pass would change a hard constraint — e.g. switching `organ`
-   off its confirmed tissue or to `None`/`Unknown` just to drop the filter —
-   STOP, keep the constraint, accept the failure, and document it. See
-   `mandatory-rules.md` §11.**
+   invoked automatically by `run_pipeline.py`). The gate is **baseline-relative**:
+   it only hard-fails (exits non-zero) on *structural breakage* or a *regression
+   vs `--baseline`*. Being above an advisory target (e.g. mean KG miss > 30%)
+   is a `[WARN]`, not a failure. The intended response to a WARN is to tune a
+   SOFT lever to improve the signal — typically add a KG-rich relative to
+   `model_species` (closest first, or a more distant well-covered species) — and
+   **re-run with the previous run's outdir as `--baseline`**. If the signal
+   improved or held, the gate PASSES; adopt the new config. If it regressed,
+   revert. See `workflows/self-tuning-protocol.md` for the gate logic and
+   `workflows/species-selection.md` for the most common fix; consult
+   `references/log-interpretation.md` for the exact per-stage diagnosis.
+   **CRITICAL: the gate is a SOFT signal and never outranks a HARD constraint
+   (the sample's real `organ`, anything the user fixed). Improve signals only
+   with SOFT parameters. The gate does not read `organ` and cannot be passed by
+   changing it: switching `organ` off its confirmed tissue or to `None`/`Unknown`
+   to drop the filter is the forbidden "organ trap". If, after the best soft-lever
+   choice, a signal is still above target but did not regress, the run PASSES
+   under the correct organ — document the residual. See `mandatory-rules.md` §11.**
 7. **Refine** mixed clusters (`workflows/refinement.md`) — in autonomous
    mode (complete-annotation), refine **every** cluster where the
    top-2 distinct cell types have an `init_weight` ratio > 0.5, in
