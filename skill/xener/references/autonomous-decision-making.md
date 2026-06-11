@@ -98,6 +98,16 @@ of this dataset" is not a demo request.
   + one root cap + one ground tissue") to reduce the number of
   refinements.** Coverage is a presentation choice, not an
   annotation choice. Every eligible cluster gets refined.
+- ❌ **Polling a backgrounded pipeline/refinement with `sleep N && grep`.**
+  `sleep` blocks your turn and delays your reaction to the task's completion
+  notification; `sleep ≥ 120` also collides with the Bash command timeout
+  (exit 143). Wait by **ending your turn** (the notification re-invokes you),
+  by `TaskOutput block:true`, or by `ScheduleWakeup` — and peek with a **bare**
+  `grep` (no `sleep`). See `mandatory-rules.md` §9.
+- ❌ **Re-reading the multi-GB h5ad when one read suffices.** Inspect once with
+  `scripts/inspect_h5ad.py`; let the quality gate and `plot_umap.py` consume
+  the lightweight `{dataset}_annotation.csv` instead. See `mandatory-rules.md`
+  §10.
 
 ## Self-tuning loop (optional but recommended)
 

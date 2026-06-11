@@ -105,6 +105,12 @@ python scripts/refine_cluster.py \
 **Important**: `--celltype` values must come **exactly** from
 `celltype_weight.csv` for the target cluster. Do not invent names.
 
+> **Waiting for batch refinement (mandatory-rules.md §9):** refining all
+> eligible clusters in one `--plan` process takes a few minutes. Background it
+> and **end your turn** (the completion notification re-invokes you), or run it
+> foreground with a generous `timeout`. **Never** `sleep`-poll; peek with a
+> bare `grep`, or wait with `TaskOutput block:true`.
+
 > **`--markers` MUST be `gene_homolo_weight.csv` (Step 3 output), NOT
 > `topk_markers.csv` (Step 4 output).** This is the single most common
 > refinement mistake and it fails *silently*: the run completes exit-0 but

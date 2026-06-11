@@ -11,35 +11,32 @@ documents the inspection procedure.
 - The agent may need organ hints (uns metadata, file path)
 - The agent needs to estimate `top_num` based on cluster sizes
 
-## Inspection script (the ONLY inline import allowed)
+## Inspect with `scripts/inspect_h5ad.py` (load the h5ad ONCE)
 
-```python
-import scanpy as sc
-adata = sc.read('<path_to_h5ad>')
+Run the dedicated inspection script. It loads the (often multi-GB) h5ad
+**exactly once** and prints every field you need to compose a config:
 
-# 1. Cluster columns
-print("=== obs columns ===")
-print(adata.obs.columns.tolist())
-print("=== cardinality ===")
-for col in adata.obs.columns:
-    n_unique = adata.obs[col].nunique()
-    if 2 <= n_unique <= 100:  # likely a clustering result
-        print(f"  {col}: {n_unique} unique values")
-
-# 2. Metadata
-print("=== uns keys ===")
-print(list(adata.uns.keys()))
-
-# 3. Species hints from var_names prefix
-if len(adata.var_names) > 0:
-    sample = adata.var_names[:20].tolist()
-    print("=== var_names sample ===")
-    print(sample)
-
-# 4. Basic shape
-print(f"Shape: {adata.shape}")
-print(f"obs: {adata.n_obs} cells, var: {adata.n_vars} genes")
+```bash
+python scripts/inspect_h5ad.py <path_to_h5ad>
+python scripts/inspect_h5ad.py <path_to_h5ad> --json   # machine-readable
 ```
+
+It reports: shape; obs columns + cardinality; **recommended `cluster_key`**
+(leiden → louvain → *cluster*, skipping existing `celltype`/`annotation`
+columns); `uns` keys; `var_names` sample **+ detected species**; `obsm` keys
+(is `X_umap` present?); whether `raw` is set; an `.X` sparsity/range/log-norm
+sanity check; **cluster-size summary** (n / min / median / mean / max) for the
+recommended key; a **recommended `top_num`**; and **organ/tissue hints**.
+
+> **Do NOT follow this with ad-hoc `python -c "import scanpy; sc.read(...)"`
+> reads to grab "one more field".** Every field needed to write the config is
+> already in the output above. Each extra read of a ~1 GB h5ad is ~30-45 s and
+> is the single largest I/O cost of the workflow. This is the I/O discipline
+> mandated by `mandatory-rules.md` §10. (`inspect_h5ad.py` imports `scanpy`
+> directly; this is the sanctioned inspection path, alongside the rule §1
+> exception. It never `import xener` and needs no `--init-config`.)
+
+The decision tables below explain how to *interpret* the script's output.
 
 ## Decision rules
 
@@ -100,26 +97,30 @@ afford smaller top_num.
 
 ## What to do with the inspection result
 
-1. **Compose a config.yaml** with the inferred values.
-2. **Present it to the user** with reasoning for each non-trivial
-   choice (species, organ).
+1. **Compose a config.yaml** with the inferred values (the script already
+   recommends `cluster_key` and `top_num`; you decide `model_species` and
+   `organ` from the species/organ hints).
+2. **Present it to the user** with reasoning for each non-trivial choice
+   (species, organ) — unless the user has asked you to run fully autonomously,
+   in which case log the reasoning instead of blocking on confirmation.
 3. **For technical parameters** (top_num, mode, decay_factor, etc.),
    just include them in the config with a brief inline comment.
-4. **Wait for user confirmation** before running.
+4. **Do not re-read the h5ad.** Everything you need is in the
+   `inspect_h5ad.py` output; a second `sc.read()` of a multi-GB file is the
+   most common avoidable I/O cost (`mandatory-rules.md` §10).
 
 Example presentation:
 
 ```
-I inspected the h5ad file and detected:
+I inspected the h5ad file (one load, scripts/inspect_h5ad.py) and detected:
 - cluster_key: "leiden" (15 clusters)
-- species hint: var_names start with "Zm" → Zea_mays (maize)
+- species hint: var_names start with "Zm" -> Zea_mays (maize)
 - organ: not detected in metadata
+- recommended top_num: 30 (median cluster size = 180 cells)
 
 Proposed config:
 - model_species: [Zea_mays, Oryza_sativa, Sorghum_bicolor]
   (same family Poaceae, all 3 have gene models in xener)
 - organ: leaf (default; please confirm)
-- top_num: 30 (median cluster size = 180 cells)
-
-Proceed? (y/n)
+- top_num: 30
 ```

@@ -106,6 +106,12 @@ def main():
     # minimal AnnData from this CSV. Neither run_from_yaml nor refine_cluster.py
     # persists these labels, so this is the single consolidation point for
     # 'xener' / 'xener_refine'.
+    #
+    # This block also performs the ONLY non-pipeline h5ad read of the run (to
+    # attach UMAP coordinates + cluster labels). The quality gate below then
+    # reuses the resulting CSV for cluster sizes, so it adds NO further h5ad
+    # read - see mandatory-rules.md sec.10.
+    annot_path = None
     try:
         import scanpy as sc
         import pandas as pd
@@ -166,21 +172,19 @@ def main():
     except Exception as e:
         print(f"[WARN] Failed to persist annotation artifact: {e}", file=sys.stderr)
 
-    # Mandatory post-run quality gate. If this fails, the pipeline exits
-    # non-zero and the run is not considered successful. The agent must
-    # inspect the gate output, adjust the config (most commonly
-    # model_species), and re-run from step 3.
-    import subprocess
-    h5ad_path = config.get("non_model_h5ad")
-    gate = subprocess.run(
-        [sys.executable, str(Path(__file__).parent / "check_output.py"),
-         "--outdir", config["outdir"], *(["--h5ad", h5ad_path] if h5ad_path else [])],
-        capture_output=True, text=True,
+    # Mandatory post-run quality gate. Run IN-PROCESS (no subprocess, no extra
+    # h5ad read): cluster sizes come from the annotation CSV written just above.
+    # If this fails, the pipeline exits non-zero and the run is not considered
+    # successful. The agent must inspect the gate output, adjust the config
+    # (most commonly model_species), and re-run from step 3.
+    from check_output import run_gate
+    ok, _ = run_gate(
+        outdir=config["outdir"],
+        annotation_csv=annot_path,            # None if the artifact write failed
+        cluster_key=config.get("cluster_key"),
     )
-    print(gate.stdout, end="")
-    if gate.returncode != 0:
-        print(gate.stderr, end="", file=sys.stderr)
-        sys.exit(gate.returncode)
+    if not ok:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
