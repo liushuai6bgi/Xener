@@ -44,18 +44,22 @@ diagnostic inline). It performs these five checks; the run is
 
 The first three are the most important. A failure of (1) or (3) is often
 `model_species` being too narrow for the chosen organ -- the **soft** fix is to
-add a closer relative that exists in the KG; see `workflows/species-selection.md`
+add a relative that exists in the KG (closest first, or a more distant but
+well-covered species to rescue coverage); see `workflows/species-selection.md`
 for the worked example.
 
 > **Before applying any fix, classify the lever (see `mandatory-rules.md` §11).**
 > The gate message says "widen model_species" and `log-interpretation.md` lists
 > "try a different organ / organ=None" — but *which* of those is legal depends
-> on what is hard vs soft. Adding a KG-present closer relative is a soft fix
-> (always allowed). Changing `organ` away from the sample's confirmed tissue, or
-> to `None`/`Unknown` purely to drop the filter, changes a HARD constraint and is
-> NOT allowed just to turn the gate green. If a high KG miss persists under the
-> correct organ after the soft levers are exhausted, ACCEPT it and document it —
-> it reflects shallow KG coverage for that (clade x organ) pair, not a config bug.
+> on what is hard vs soft. Adding any KG-present species is a soft fix (always
+> allowed) — closest relatives first, or a more distant, well-covered species
+> when the close ones are missing or KG-shallow; `model_species` has no hard
+> phylogenetic boundary. Changing `organ` away from the sample's confirmed
+> tissue, or to `None`/`Unknown` purely to drop the filter, changes a HARD
+> constraint and is NOT allowed just to turn the gate green. If a high KG miss
+> persists under the correct organ after the species lever is exhausted (close
+> *and* distant well-covered species tried), ACCEPT it and document it — it
+> reflects shallow KG coverage for that organ, not a config bug.
 
 ## What the gate looks like in practice
 

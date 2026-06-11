@@ -77,12 +77,14 @@ and heuristics. The high-level flow is:
    for the stage-by-stage grep-driven diagnosis — the gate identifies
    the class of failure, the log reference identifies the exact
    failure inside the class. **CRITICAL: the gate is a SOFT signal and
-   never outranks a HARD constraint (the sample's real `organ`, the
-   `model_species` clade, anything the user fixed). Only fix the gate
-   with SOFT parameters. If the sole way to pass would change a hard
-   constraint — e.g. switching `organ` off its confirmed tissue or to
-   `None`/`Unknown` just to drop the filter — STOP, keep the constraint,
-   accept the failure, and document it. See `mandatory-rules.md` §11.**
+   never outranks a HARD constraint (the sample's real `organ`, anything
+   the user fixed). Only fix the gate with SOFT parameters — `model_species`
+   is one of them: there is no hard phylogenetic boundary, so adding a more
+   distant but KG-rich species to rescue coverage is a legal soft fix. If the
+   sole way to pass would change a hard constraint — e.g. switching `organ`
+   off its confirmed tissue or to `None`/`Unknown` just to drop the filter —
+   STOP, keep the constraint, accept the failure, and document it. See
+   `mandatory-rules.md` §11.**
 7. **Refine** mixed clusters (`workflows/refinement.md`) — in autonomous
    mode (complete-annotation), refine **every** cluster where the
    top-2 distinct cell types have an `init_weight` ratio > 0.5, in
@@ -158,8 +160,10 @@ three most important constraints:
 - **Use ONLY scripts in `scripts/`. Never `import xener` directly.**
 - **Never pass config via stdin.** Always use a config file path.
 - **Always confirm `model_species` and `organ` with the user before running.**
-- **Hard constraints (real `organ`, species clade, user-fixed values) outrank
-  the quality gate — never change one just to pass the gate (§11).**
+- **Hard constraints (real `organ`, user-fixed values) outrank the quality
+  gate — never change one just to pass the gate (§11). `model_species` is NOT
+  hard: adding a more distant, KG-rich species to rescue coverage is a legal
+  soft fix.**
 
 ## Reference docs (load on demand)
 

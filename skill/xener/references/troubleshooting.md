@@ -150,7 +150,7 @@ output. In that case, **do not re-run blindly** — diagnose first.
 
 | Symptom in log / output | Likely cause | Fix |
 |---|---|---|
-| `total X% homolos of organ[...] not in kg` with mean `X > 0.30` | KG coverage gap | Add target species (if model organism) or a closer relative — see `workflows/species-selection.md`. If the soft fix barely helps, ACCEPT the failure under the correct organ; do not change a confirmed `organ` to pass (`mandatory-rules.md` §11) |
+| `total X% homolos of organ[...] not in kg` with mean `X > 0.30` | KG coverage gap | Add target species (if model organism) or a closer relative; if close relatives are missing/KG-shallow, also add a more distant but well-covered species — see `workflows/species-selection.md`. If close *and* distant well-covered species barely help, ACCEPT the failure under the correct organ; do not change a confirmed `organ` to pass (`mandatory-rules.md` §11) |
 | `no candidate type after threshold, set to "unknown"` repeated | `threshold` too strict | Re-run step 5 with `--threshold null` |
 | `multiple mapping detected!` | `mapping_strict=1` collapsing ties | Set `mapping_strict=0` |
 | `>>>Xener pipeline finished` but all clusters have weight ≈ 0 | Empty BLAST result (wrong fasta / wrong model_species) | Verify `non_model_fasta` contains marker genes; verify `model_species` are in `list_species.py` |

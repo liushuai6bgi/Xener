@@ -219,37 +219,50 @@ This rule is data-independent; it applies to every run.
 | `organ`, once it reflects a known/confirmed tissue of the sample | Biological fact about the data |
 | `cluster_key` | What the h5ad actually contains |
 | input `non_model_h5ad` / `non_model_fasta` | The data under analysis |
-| `model_species` **phylogenetic boundary** (must be genuine relatives of the target) | Validity of homology transfer |
 | any value the **user explicitly set or confirmed** | User intent outranks the agent |
 | `model_species` / `organ` membership in the KG + BLAST DB | Infrastructure fact; an absent value cannot run |
 
+Note: `model_species` is **no longer a hard constraint**. The *only* hard fact
+about species is the last row — a species must exist in the KG + BLAST DB to be
+usable. *Which* species you pick (clade, distance, count) is a SOFT tuning lever
+(see below and the SOFT table).
+
 | SOFT parameter — tune these freely to improve the gate |
 |---|
-| `model_species` membership *inside* the valid boundary (how many relatives; whether to add a KG-rich close relative) |
+| **`model_species` entirely — clade, phylogenetic distance, and count.** Prefer the closest relatives, but when close relatives are absent or shallow in the KG you MAY add more distant species that are well-represented in the KG for the target organ. Constraints: each species must exist in the KG + BLAST DB (hard), and you *add to* the close relatives rather than replacing them. |
 | BLAST thresholds: `pident`, `evalue`, `bitscore` |
 | `top_num`, `multihomolo`, `homolo_weight_key`, `marker_weight_method` |
 | `mode`, `decay_factor`, `threshold`, `ann_strict`, `mapping_strict` |
 | `candidate_annotation` (restrict the output cell-type set) |
 
-The split on `model_species` is the subtle part: *which clade* is hard (biology);
-*how many members within that clade* is soft (tuning). Adding a closer relative
-that already exists in the KG is a soft fix. Switching to a phylogenetically
-wrong species, or turning the organ filter off, is changing a hard constraint.
+`model_species` is a SOFT lever in full. There is no hard "phylogenetic
+boundary": picking a more distant species is a tuning choice, not a constraint
+violation. The trade-off to weigh is *homology validity vs KG coverage* — a
+distant species transfers homology less reliably, so reach for it to **rescue
+KG coverage** when closer relatives are missing or KG-shallow, keep the close
+relatives in the list as well, and prefer the closest species that has
+sufficient KG depth. What you must NOT do to pass the gate is change a HARD
+constraint — turning the `organ` filter off, or moving `organ` to a tissue the
+sample is not. Adding a well-covered distant species is a legal soft fix;
+changing the confirmed organ is not.
 
 ### Protocol when the gate fails
 
 1. Identify which check failed (`self-tuning-protocol.md`) and the exact cause
    (`log-interpretation.md`).
-2. Ask: **can a SOFT parameter fix it?** (add a valid closer relative, relax
-   BLAST thresholds, raise `top_num`, drop `threshold`, restrict
-   `candidate_annotation`, ...). If yes, do that and re-run.
+2. Ask: **can a SOFT parameter fix it?** (add a KG-present relative — closest
+   first, or a more distant but well-covered species to rescue KG coverage;
+   relax BLAST thresholds; raise `top_num`; drop `threshold`; restrict
+   `candidate_annotation`; ...). If yes, do that and re-run.
 3. If the only fix would change a HARD constraint — e.g. "switch `organ` away
    from the sample's real tissue", "set `organ=None`/`Unknown` purely to drop
-   the filter", "add a phylogenetically unrelated species just for coverage" —
-   **STOP. Do not do it.** Keep the hard constraint, accept the gate failure,
-   and write the justification to `outdir/autonomous_log.md`: which check
-   failed, which soft fixes you tried and their effect, and why no soft fix
-   exists.
+   the filter" — **STOP. Do not do it.** Keep the hard constraint, accept the
+   gate failure, and write the justification to `outdir/autonomous_log.md`:
+   which check failed, which soft fixes you tried (including which species you
+   added and from how far out) and their effect, and why no soft fix exists.
+   Adding a phylogenetically distant species is a SOFT fix, not a hard-constraint
+   change — so reaching this step means even distant, KG-rich species did not
+   help, which points the finger at organ-level KG depth, not at the species set.
 4. A gate failure that survives step 3 is an **accepted failure, not a failed
    run.** The deliverable is the biologically-correct annotation plus the
    documented residual gate signal — NOT a gate-green run built on a falsified
@@ -260,19 +273,22 @@ wrong species, or turning the organ filter off, is changing a hard constraint.
 When check 1 (KG miss) fails, the gate message and some docs say
 "model_species too narrow for the chosen organ." Only these responses are legal:
 
-- ✅ Add a closer relative that exists in the KG (soft), OR relax BLAST, OR —
-  **only if `organ` was an unconfirmed guess** — reconsider the organ.
+- ✅ Add a KG-present relative (soft) — closest first, but a **more distant,
+  well-covered species is also a legal soft addition** when close relatives are
+  missing or KG-shallow (keep the close ones too); OR relax BLAST; OR — **only
+  if `organ` was an unconfirmed guess** — reconsider the organ.
 - ❌ Change `organ` to a tissue the sample is NOT, or to `None`/`Unknown`
   purely to lift the filter, **when the organ is a confirmed property of the
-  data.** A high KG miss under the *correct* organ usually means the KG is
-  simply shallow for that (clade x organ) pair — a property of the KG, not a
-  config error. The honest result is an accepted gate failure under the correct
-  organ.
+  data.** A high KG miss that persists even after you have added the best
+  available species (close *and* distant well-covered) usually means the KG is
+  simply shallow for that organ — a property of the KG, not a config error. The
+  honest result is an accepted gate failure under the correct organ.
 
-**Diagnostic tell:** if you applied the gate-suggested soft lever (added a
-KG-rich relative) and the metric barely moved, the bottleneck is NOT the soft
-lever — it is a hard constraint's coverage in the KG. That is your cue to
-ACCEPT, not to start changing hard constraints.
+**Diagnostic tell:** if you applied the species soft lever to its limit —
+closest relatives *plus* the most KG-rich distant species available — and the
+metric barely moved, the bottleneck is NOT the species set; it is the organ's
+coverage depth in the KG (a hard fact). That is your cue to ACCEPT, not to start
+changing the confirmed organ.
 
 ### Red flags — STOP, you are about to violate this rule
 

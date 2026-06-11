@@ -13,12 +13,23 @@ heuristic.
    - filename hints
    - user prompt keywords
 
-2. If detected, pick 1-3 species from the SAME taxonomic family:
+2. If detected, pick 1-3 species from the SAME taxonomic family (preferred):
    - Phylogenetic distance: same genus > same family > same order
    - Trade-off: more species = more homolog evidence, but more noise
 
 3. If not detected, list available species to the user and ask
    for the target species first.
+
+4. `model_species` is a SOFT lever, not a hard boundary. The family
+   preference in step 2 is exactly that — a preference. When the close
+   relatives are absent from the KG, or present but shallow for the target
+   organ (e.g. the post-run gate reports a high KG-miss), you MAY supplement
+   the list with more distant species that are well-represented in the KG.
+   Keep the close relatives in the list, prefer the closest species that has
+   sufficient KG depth, and treat distant additions as KG-coverage rescue —
+   distant homology transfers less reliably, so it is a supplement, not a
+   replacement. The only hard fact about a species is that it must exist in
+   the KG + BLAST DB. See `mandatory-rules.md` §11.
 ```
 
 ## Phylogenetic distance table (plants)
