@@ -293,24 +293,28 @@ class Xener:
 
         return cluster2celltype, cluster2max_initweight_celltype, debug_params
     
-    def get_markers(self, adata:sc.AnnData, cluster_key:str=None) -> tuple[pd.DataFrame, dict]:
+    def get_markers(self, adata:sc.AnnData, cluster_key:str=None, HVG:bool=False, n_top_genes:int=2000) -> tuple[pd.DataFrame, dict]:
         '''
         Preprocess and analyze single-cell data, returning marker genes.
         Parameters:
             adata (sc.AnnData): Object containing single-cell data, including gene expression matrix and associated metadata
             preprocess (bool, optional): Whether to perform quality control preprocessing. Defaults to False
             batch_key (str, optional): Batch key. Defaults to None; if provided, batch effect correction will be applied
+            HVG (bool, optional): Whether to perform high-variance gene selection. Defaults to False
+            n_top_genes (int, optional): Number of top genes to select. Defaults to 2000
         Returns:
             pd.DataFrame: Result of scanpy.get.rank_genes_groups_df
             dict: Debug parameters
         '''
+        debug_params = {'HVG':HVG, 'n_top_genes':n_top_genes}
         logger.info(f'>>>getting markers cluster_key[{cluster_key}].')
-        process(adata)
+        process(adata, HVG, n_top_genes)
         if adata.obs[cluster_key].dtype != 'str':
             adata.obs[cluster_key] = adata.obs[cluster_key].astype('str')
         raw_available = hasattr(adata, 'raw') and adata.raw is not None
         logger.info(f'raw_available[{raw_available}]')
         use_raw = raw_available and issparse(adata.raw.X)
+        debug_params['use_raw'] = use_raw
         if not use_raw and not issparse(adata.X):
             logger.error('Unavailable data! cann\'t find available counts.')
             # raise Exception('Unavailable data! cann\'t find available counts.')
@@ -319,7 +323,12 @@ class Xener:
         sc.tl.rank_genes_groups(adata, groupby=cluster_key, key_added = "rank_genes_groups", use_raw=use_raw, pts=True)
         # Get gene ranking table = number of clusters * number of genes
         markers = sc.get.rank_genes_groups_df(adata, group=None, key='rank_genes_groups')
-        return markers.drop(columns=['scores']), {'use_raw':use_raw}
+        
+        # filter markers
+        markers = markers[(markers['logfoldchanges'] > 0.25) & 
+                (markers['pvals_adj'] < 0.05) & 
+                (markers['pct_nz_group'] > 0.1)]
+        return markers.drop(columns=['scores']), debug_params
         
     def get_gene_weight(self, markers:pd.DataFrame, marker_weight_method:Literal['prod','sum']=None) -> tuple[pd.DataFrame, dict]:
         marker_weight_method = self._default_config['marker_weight_method'] if marker_weight_method is None else marker_weight_method

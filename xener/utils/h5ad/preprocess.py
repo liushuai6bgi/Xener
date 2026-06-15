@@ -98,12 +98,11 @@ def quality_control(adata:sc.AnnData) -> sc.AnnData:
         logger.info('skip setting adata.raw; use sparse adata.X directly to avoid large raw copies')
     return adata
 
-def process(adata:sc.AnnData, force_HVG:bool=False, n_top_genes:int=2000):
-    threshold_genes = 4000
+def process(adata:sc.AnnData, HVG:bool=False, n_top_genes:int=2000):
+    # threshold_genes = 4000
     adata_genes = adata.shape[1]
     adata = quality_control(adata)
-    logger.info(f'gene counts that [adata:threshold]=[{adata_genes}:{threshold_genes}].')
-    if force_HVG or adata_genes > threshold_genes:
+    if HVG and adata_genes > n_top_genes:
         logger.info(f'highly_variable_genes[{n_top_genes}].')
         sc.pp.highly_variable_genes(
             adata,
