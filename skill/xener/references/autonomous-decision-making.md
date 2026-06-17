@@ -26,7 +26,7 @@ of biological / experimental choices.
 | `ann_strict` | ✅ Yes | Default 0. Set to 1 if multiple clusters share identical top cell types. |
 | `num_threads` | ✅ Yes | Read `os.cpu_count()`. Use max(1, n_cpu - 2). |
 | `outdir` | ⚠️ Ask user if not obvious | Default: `./xener_output/<dataset_basename>`. |
-| Refinement targets | ✅ Yes, run on **all** eligible | After step 5, run `scripts/suggest_refine.py --topk 5` to get top-5 per cluster. Apply semantic dedup (e.g. "phloem" + "vascular tissue" → "phloem"). Mark cluster as eligible if top-2 distinct init_weight ratio > 0.5. **Refine every eligible cluster, not a subset.** The previous "pick up to 3" guidance was a demo-time heuristic and produced incomplete annotations — see `mandatory-rules.md` §8. Prioritization is *only* for ordering (tightest ratio first, then largest cluster first), never for *excluding* clusters. Do not pre-filter by "biological lineages with known subtypes" — refine cross-lineage high-ratio clusters (e.g. quiescent center + root hair cell at ratio 1.0) too; that pairing is a signal the clustering may be bad, not a reason to skip. Run `scripts/refine_cluster.py` on every eligible cluster; do not ask the user. |
+| Refinement targets | ✅ Yes, run on **all** eligible | After step 5, run `scripts/suggest_refine.py --topk 5` to get top-5 per cluster. Apply semantic dedup (e.g. "phloem" + "vascular tissue" → "phloem"). Mark cluster as eligible if top-2 distinct init_weight ratio > 0.5. **Refine every eligible cluster, not a subset.** Prioritization is *only* for ordering (tightest ratio first, then largest cluster first), never for *excluding* clusters. Do not pre-filter by "biological lineages with known subtypes" — refine cross-lineage high-ratio clusters (e.g. quiescent center + root hair cell at ratio 1.0) too; that pairing is a signal the clustering may be bad, not a reason to skip. Run `scripts/refine_cluster.py` on every eligible cluster; do not ask the user. |
 | Refinement method (`--markergene-method`, `--split-method`) | ✅ Yes | **Use `--markergene-method all --split-method argmax`** — empirically the highest refinement success rate. The script defaults (`diff` / `bindiv`) frequently fail to split: `diff` returns 0 markers when the two candidates share KG homologs, and `bindiv` then assigns all cells to one candidate (`[N, 0]`). Only fall back to defaults if you specifically need stricter differential/binary behavior. |
 | Refinement `--markers` input | ✅ Yes | **Always pass `gene_homolo_weight.csv` (Step 3), never `topk_markers.csv` (Step 4).** Refinement collects the cluster's homolog set from this file to query the KG; `topk_markers.csv` is truncated to `top_num` genes/cluster, which starves the split and makes nearly every cluster refine to one uniform label (a silent, exit-0 failure that *looks like* clean clustering). Only `group`/`gene`/`homolo` are read — coverage matters, weights do not. |
 
@@ -38,8 +38,11 @@ of biological / experimental choices.
    qualification), treat the task as **complete-annotation** mode —
    see "Completeness vs. demonstration" below — and plan to refine
    every eligible cluster, not a representative subset.
-2. **Inspect the h5ad file** with `python -c "import scanpy as sc; adata =
-   sc.read('<path>'); print(adata.obs.columns); print(adata.uns.keys())"`.
+2. **Inspect the h5ad file** with `scripts/inspect_h5ad.py <path_to_h5ad>` —
+   see `references/workflows/inspection.md`. It runs once and reports
+   cluster_key, species hints, organ hints, cluster sizes, and recommended
+   `top_num`. Do **not** use ad-hoc `sc.read()` commands to inspect
+   (`mandatory-rules.md` §10).
 3. **Decide parameters** using the heuristics above. Write the
    decision + reasoning in your scratchpad.
 4. **For biological parameters** (organ, model_species): still ask

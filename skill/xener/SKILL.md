@@ -10,14 +10,13 @@ description: |
   types per cluster. Supports sub-cluster refinement with Moran's I gene
   filtering for splitting "mixed" clusters into subtypes.
 
-  Trigger on any of: single-cell annotation, cell type prediction, cell type
+  Trigger on: single-cell annotation, cell type prediction, cell type
   labeling, cross-species gene mapping, h5ad cell type analysis, marker gene
-  annotation for clusters, scRNA-seq cluster annotation, "annotate this
-  dataset", "what cell types are in my data", "label clusters in this
-  single-cell data", or any mention of BLAST + knowledge-graph based
-  annotation. Make sure to invoke this skill even when the user just says
-  "annotate" in a single-cell context — do not fall back to generic Python
-  scripts that import xener directly.
+  annotation, scRNA-seq cluster annotation, "annotate this dataset",
+  "what cell types are in my data", "label clusters in this single-cell
+  data", or BLAST + knowledge-graph based annotation. Invoke even when
+  the user simply says "annotate" in a single-cell context — do not fall
+  back to generic Python scripts that import xener directly.
 
 allowed-tools: Bash(python scripts/*), Read, Write, Edit, Glob, Grep
 metadata:
@@ -66,32 +65,20 @@ and heuristics. The high-level flow is:
 4. **Confirm biological choices** (species, organ) with the user —
    propose 1-3 candidates with reasoning, not open-ended questions
 5. **Run** the pipeline (`workflows/full-pipeline.md`)
-6. **Run the mandatory post-run quality gate** (`scripts/check_output.py`,
-   invoked automatically by `run_pipeline.py`). The gate is **baseline-relative**:
-   it only hard-fails (exits non-zero) on *structural breakage* or a *regression
-   vs `--baseline`*. Being above an advisory target (e.g. mean KG miss > 30%)
-   is a `[WARN]`, not a failure. The intended response to a WARN is to tune a
-   SOFT lever to improve the signal — typically add a KG-rich relative to
-   `model_species` (closest first, or a more distant well-covered species) — and
-   **re-run with the previous run's outdir as `--baseline`**. If the signal
-   improved or held, the gate PASSES; adopt the new config. If it regressed,
-   revert. See `workflows/self-tuning-protocol.md` for the gate logic and
-   `workflows/species-selection.md` for the most common fix; consult
-   `references/log-interpretation.md` for the exact per-stage diagnosis.
-   **CRITICAL: the gate is a SOFT signal and never outranks a HARD constraint
-   (the sample's real `organ`, anything the user fixed). Improve signals only
-   with SOFT parameters. The gate does not read `organ` and cannot be passed by
-   changing it: switching `organ` off its confirmed tissue or to `None`/`Unknown`
-   to drop the filter is the forbidden "organ trap". If, after the best soft-lever
-   choice, a signal is still above target but did not regress, the run PASSES
-   under the correct organ — document the residual. See `mandatory-rules.md` §11.**
+6. **Run the mandatory post-run quality gate** (invoked automatically by
+   `run_pipeline.py`). The gate is **baseline-relative**: it only hard-fails
+   on structural breakage or regression vs `--baseline`. Above-target signals
+   (e.g. mean KG miss > 30%) are advisory `[WARN]`s. To address a WARN, tune
+   a SOFT lever (add KG-rich `model_species`, relax BLAST thresholds, etc.)
+   and re-run with `--baseline <prev_outdir>`. Keep the change if signals
+   improved or held; revert if they regressed. **Never change a HARD constraint
+   (confirmed `organ`, user-fixed values) to move a soft signal** — see
+   `mandatory-rules.md` §11 for the full SOFT-vs-HARD protocol, the "organ
+   trap", and the residual-signal pass rule.
 7. **Refine** mixed clusters (`workflows/refinement.md`) — in autonomous
    mode (complete-annotation), refine **every** cluster where the
    top-2 distinct cell types have an `init_weight` ratio > 0.5, in
-   order of descending ratio. The previous "up to 3" guidance is
-   withdrawn; see `mandatory-rules.md` §8 and
-   `autonomous-decision-making.md` §"Completeness vs. demonstration"
-   for the full reasoning. In manual mode, present the eligible
+   order of descending ratio. In manual mode, present the eligible
    list and ask the user which to refine before running.
 8. **Visualize** (`workflows/refinement.md` Step D) — run `plot_umap.py
    --mode overview` once, then `--mode refine` for **every** cluster

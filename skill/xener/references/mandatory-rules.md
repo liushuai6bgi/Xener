@@ -84,12 +84,24 @@ in 6-column tables — see main `SKILL.md` for the formatting rule), then
 If a script fails, you may edit the script to fix the bug, then re-run it.
 **Do not write new scripts** to work around a failure.
 
+**Why**: Custom scripts bypass checkpointing, `debug_params.yaml`
+reproducibility recording, and the centralized validation and `--init-config`
+construction path (`_xener_init.py`) that every built-in script enforces.
+A one-off script has no logging, no parameter recording, and no way for
+subsequent pipeline steps to discover it. Fixing the existing script
+preserves the full orchestration contract.
+
 ## 5. Config field validation
 
 Before running, the config must satisfy:
 - `model_species`: list, each element must be in `scripts/list_species.py` output
 - `organ`: string, must be in `scripts/list_organs.py` output
 - `non_model_h5ad`, `non_model_fasta`, `outdir`: non-empty strings
+
+**Why**: Invalid field values are the most common cause of pipeline failures —
+a typo in a species name, a non-existent organ, or a missing output path.
+Validating against `list_species.py` / `list_organs.py` output catches these
+before the pipeline starts, saving the multi-minute BLAST + KG run.
 
 See `workflows/config-validation.md` for the full validation procedure.
 

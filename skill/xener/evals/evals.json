@@ -1,0 +1,26 @@
+{
+  "skill_name": "xener",
+  "evals": [
+    {
+      "id": 1,
+      "name": "cross-species-annotation-maize",
+      "prompt": "I have single-cell RNA-seq data from maize leaves. The h5ad is at data/maize_leaf.h5ad and the FASTA is at data/Zea_mays.fasta. Can you annotate the cell types? I don't have a good reference for maize so you'll need to use cross-species mapping.",
+      "expected_output": "A completed annotation pipeline run producing cell type predictions per cluster in the output directory, with UMAP visualizations and a refinement step for eligible mixed clusters.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "annotate-with-blast-troubleshooting",
+      "prompt": "I ran xener on my bamboo single-cell data but the annotation looks wrong — most clusters show 'unknown' as the top cell type. The config uses Oryza_sativa and Sorghum_bicolor as model species. What should I check?",
+      "expected_output": "Diagnosis of the empty annotation issue (e.g., BLAST thresholds too strict, model_species too distant, KG coverage gaps) and recommended config adjustments.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "refine-mixed-clusters",
+      "prompt": "I've already run the xener pipeline on my rice root data and the output is in output/root_run/. The celltype_weight.csv shows several clusters where the top two cell types have similar weights — like cluster 3 has 'cortex' at 0.4 and 'endodermis' at 0.35. Can you refine these mixed clusters into subtypes?",
+      "expected_output": "A refinement run on eligible mixed clusters producing refined cell type labels and updated UMAP visualizations.",
+      "files": []
+    }
+  ]
+}
