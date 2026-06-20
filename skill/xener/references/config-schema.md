@@ -23,6 +23,8 @@ multihomolo: true                   # Keep multiple homologs per gene
 decay_factor: 0.7                   # Weight decay for graph propagation
 mode: path                          # node | path
 threshold: null                     # Z-score threshold for filtering
+mapping_strict: 0                   # -1=loose, 0=default, 1=per-group max
+ann_strict: 0                       # <0=binarize, 0=default, 1=per-row max, 2=global max
 candidate_annotation:               # Restrict cell types (optional)
   - type1
   - type2
@@ -45,6 +47,8 @@ candidate_annotation:               # Restrict cell types (optional)
 | `decay_factor` | float | no | `0.7` | Graph weight decay at each propagation hop |
 | `mode` | string | no | `path` | `node` (single type) or `path` (trajectory-aware) |
 | `threshold` | float \| null | no | `null` | Z-score threshold for filtering low-weight cell types |
+| `mapping_strict` | int | no | `0` | Strict mode for BLAST mapping: <0=loose (weight=1), 0=default, 1=per-group max |
+| `ann_strict` | int | no | `0` | Strict mode for annotation: <0=binarize, 0=default, 1=per-row max, 2=global max |
 | `candidate_annotation` | list[string] | no | `null` | Restrict the output cell-type set |
 
 ## Minimal example

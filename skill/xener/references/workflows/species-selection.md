@@ -84,7 +84,6 @@ python scripts/step3_mapping.py \
     --fasta target.fasta \
     --species Oryza_sativa Arabidopsis_thaliana Zea_mays \
     --pident 40 --evalue 0.1 --bitscore 150 \
-    --multihomolo \
     --outdir output/
 ```
 

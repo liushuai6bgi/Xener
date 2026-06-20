@@ -6,7 +6,7 @@ Step 3 and selects the top K genes per cluster (default K=30). Set
 --multihomolo to keep multiple homologs per non-model gene.
 
 Skill context: invoked by run_pipeline.py or directly during
-references/workflows/step-by-step.md when tuning --k. Writes
+references/workflows/step-by-step.md when tuning --top_num. Writes
 topk_markers.csv as input to Step 5.
 """
 

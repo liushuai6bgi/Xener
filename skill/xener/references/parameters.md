@@ -8,7 +8,7 @@ individual steps.
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--input` | required | Path to h5ad file |
-| `--cluster-key` | required | Column in `adata.obs` with cluster labels |
+| `--cluster-key` | `leiden` | Column in `adata.obs` with cluster labels |
 | `--outdir` | required | Output directory |
 
 ## Step 2: Calculate gene weights (`step2_weight.py`)
@@ -30,6 +30,8 @@ individual steps.
 | `--pident` | `60` | Minimum percent identity filter |
 | `--evalue` | `0.05` | Maximum e-value filter |
 | `--bitscore` | `200` | Minimum bitscore filter |
+| `--num-threads` | auto (70% of cores) | Number of BLASTP threads |
+| `--mapping-strict` | `0` | Strict mode: <0=loose, 0=default, 1=per-group max |
 | `--outdir` | required | Output directory |
 
 ## Step 4: Top-k genes (`step4_topk.py`)
@@ -37,8 +39,9 @@ individual steps.
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--input` | required | `gene_homolo_weight.csv` from step 3 |
-| `--k` | `30` | Top N genes per cluster |
+| `--top_num` | `30` | Top N genes per cluster |
 | `--multihomolo` | `true` | Keep multiple homologs per gene |
+| `--no-multihomolo` | — | Keep only top homolog per gene |
 | `--outdir` | required | Output directory |
 
 ## Step 5: Cell type annotation (`step5_annotate.py`)
@@ -51,6 +54,7 @@ individual steps.
 | `--mode` | `path` | `node` (single type) or `path` (trajectory) |
 | `--decay-factor` | `0.7` | Graph weight decay |
 | `--threshold` | `None` | Z-score threshold for cell-type filtering |
+| `--ann-strict` | `0` | Strict mode: <0=binarize, 0=default, 1=per-row max, 2=global max |
 | `--candidate-annotation` | `None` | Restrict to specific cell types (space-separated) |
 
 ## Refinement (`refine_cluster.py`)
@@ -59,13 +63,17 @@ individual steps.
 |-----------|---------|-------------|
 | `--input` | required | Path to h5ad file |
 | `--markers` | required | `gene_homolo_weight.csv` from step 3 |
-| `--cluster-key` | required | Column in `adata.obs` |
-| `--cluster-id` | required | ID of the cluster to refine |
-| `--celltype` | required | Comma-separated candidate cell types (must come from `celltype_weight.csv`) |
-| `--organ` | required | Organ filter |
+| `--cluster-key` | `leiden` | Column in `adata.obs` |
+| `--cluster-id` | — | (Single-cluster mode) ID of the cluster to refine |
+| `--celltype` | — | (Single-cluster mode) Comma-separated candidate cell types (must come from `celltype_weight.csv`) |
+| `--plan` | — | (Batch mode) TSV/JSON plan file; mutually exclusive with `--cluster-id` |
+| `--merge-into` | — | (Batch mode) Path to annotation CSV to merge results into |
+| `--keep-per-cluster` | `false` | Also write per-cluster CSVs when using `--merge-into` |
+| `--organ` | `None` | Organ filter |
 | `--moran-i` | `0.5` | Moran's I threshold (range [-1, 1]; >0.5 = stricter) |
 | `--split-method` | `argmax` | `argmax` (assign by max score) or `bindiv` (binary division) |
 | `--markergene-method` | `all` | `all` (all top-k genes) or `diff` (differential only) |
+| `--strict` | `0` | Strict mode: 0=default, >0=keep max-confidence cell type per gene |
 | `--key-added` | `xener_refine` | Column name in `adata.obs` for refined annotation |
 | `--outdir` | required | Output directory |
 

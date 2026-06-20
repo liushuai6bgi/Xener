@@ -133,15 +133,16 @@ python scripts/refine_cluster.py \
 
 > **Use `--markergene-method all --split-method argmax`.** This combination
 > has the **highest refinement success rate** in testing — it actually splits
-> mixed clusters into sub-populations. The script defaults
-> (`--markergene-method diff --split-method bindiv`) frequently produce *no*
-> split: `diff` returns 0 differential markers whenever the two candidate
-> cell types map to overlapping homologs in the KG (very common for close
-> sub-types such as `lateral root cap` vs `columella root cap cell`), and
-> `bindiv` then dumps every cell into one candidate, yielding a `[N, 0]`
-> result and a single-label cluster. If you see `Diff gene counts: []` or
-> `refine_single_cluster X total: ['<one type>']` for clusters you expected
-> to split, switch to `all` + `argmax` and re-run.
+> mixed clusters into sub-populations. Both are already the script defaults.
+> The old defaults (`diff` + `bindiv`) frequently produced *no* split: `diff`
+> returns 0 differential markers whenever the two candidate cell types map to
+> overlapping homologs in the KG (very common for close sub-types such as
+> `lateral root cap` vs `columella root cap cell`), and `bindiv` then dumps
+> every cell into one candidate, yielding a `[N, 0]` result and a
+> single-label cluster. If you intentionally override to `diff`/`bindiv` and
+> see `Diff gene counts: []` or `refine_single_cluster X total: ['<one
+> type>']` for clusters you expected to split, switch back to the defaults
+> (`all` + `argmax`) and re-run.
 
 ## Step D: Inspect and visualize the refined annotation
 
@@ -201,13 +202,21 @@ When you call the Python API (or inspect the script output),
 | `gene2celltype_g` | networkx.Graph | Gene → homolo → celltype graph for this refinement |
 
 The CLI wrapper (`scripts/refine_cluster.py`) saves the first
-three as a CSV and the fourth as a GEXF file:
+three as a CSV and the fourth as a GEXF file in the specified
+``--outdir`` (not a ``refine_output/`` subdirectory):
 
 ```
-output/refine_output/
-├── refined_<cluster_id>.csv            # annotation DataFrame
-└── refined_<cluster_id>_gene2celltype.gexf   # gene2celltype_g graph
+output/
+├── refined_<cluster_id>.csv                    # annotation DataFrame
+└── refined_<cluster_id>_gene2celltype.gexf     # gene2celltype_g graph
 ```
+
+When ``--merge-into`` is used (batch mode), the per-cluster CSVs and
+GEXFs are **not written** by default; pass ``--keep-per-cluster`` to
+preserve them alongside the merged annotation CSV. ``run_pipeline.py``
+searches both ``outdir/`` and ``outdir/refine_output/`` for
+``refined_*.csv`` when consolidating refinement results, so either
+location is picked up automatically.
 
 The `gene2celltype_g` graph is the **provenance** of the
 refinement: which marker genes drove the sub-cluster split,
@@ -216,7 +225,7 @@ Gephi, Cytoscape, or `networkx`:
 
 ```python
 import networkx as nx
-g = nx.read_gexf('output/refine_output/refined_4_gene2celltype.gexf')
+g = nx.read_gexf('output/refined_4_gene2celltype.gexf')
 print(f"Nodes: {g.number_of_nodes()}, Edges: {g.number_of_edges()}")
 # Inspect a specific gene's neighborhood:
 neighbors = list(g.neighbors('AT1G52050'))

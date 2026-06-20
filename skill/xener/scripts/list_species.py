@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""List available reference species from the knowledge graph.
+"""List available reference species from the BLAST database.
 
 CLI wrapper used by the Xener agent skill. Prints the valid model_species
 values that can be used in config.yaml.
 
 Skill context: invoked during references/workflows/config-validation.md to
 verify a user-supplied `model_species` list before pipeline execution.
-Output must be presented to the user in 6-column tables grouped by Plants /
-Animals / etc. — see the formatting rule in skill/xener/SKILL.md.
+Output is a simple bullet list of species names. The agent should present
+them grouped by taxonomic clade (Plants / Animals / etc.) when displaying
+to the user — the raw script output is a flat alphabetical list.
 """
 
 import argparse

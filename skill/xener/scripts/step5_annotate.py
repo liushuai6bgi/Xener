@@ -53,7 +53,8 @@ def main():
             threshold=args.threshold,
             mode=args.mode,
             decay_factor=args.decay_factor,
-            ann_strict=args.ann_strict
+            ann_strict=args.ann_strict,
+            candidate_annotation=args.candidate_annotation,
         )
 
     # Save results

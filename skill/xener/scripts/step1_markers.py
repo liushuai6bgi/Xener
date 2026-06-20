@@ -34,11 +34,9 @@ def main():
     adata = sc.read(args.input)
     annor = build_xener(args.init_config)
 
-    markers = annor.get_markers(
+    markers, debug_markers = annor.get_markers(
         adata,
         cluster_key=args.cluster_key,
-        preprocess=args.preprocess,
-        batch_key=args.batch_key
     )
 
     output_path = os.path.join(args.outdir, "marker_gene.csv")

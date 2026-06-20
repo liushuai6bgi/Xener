@@ -66,7 +66,8 @@ def read_plan(path):
     """Parse a batch plan file into a list of (cluster_id:str, celltypes:list[str])."""
     p = str(path)
     if p.lower().endswith(".json"):
-        data = json.load(open(p, encoding="utf-8"))
+        with open(p, encoding="utf-8") as json_file:
+            data = json.load(json_file)
         jobs = []
         if isinstance(data, dict):
             for k, v in data.items():
@@ -82,18 +83,19 @@ def read_plan(path):
 
     # TSV: "<cluster_id>\t<celltype1,celltype2>"
     jobs = []
-    for raw in open(p, encoding="utf-8"):
-        line = raw.rstrip("\n")
-        if not line.strip():
-            continue
-        parts = line.split("\t")
-        if len(parts) < 2:
-            raise ValueError(
-                f"Bad plan line (need '<cluster_id>\\t<celltypes>'): {line!r}"
-            )
-        cid = parts[0].strip()
-        cts = [c.strip() for c in parts[1].split(",") if c.strip()]
-        jobs.append((cid, cts))
+    with open(p, encoding="utf-8") as tsv_file:
+        for raw in tsv_file:
+            line = raw.rstrip("\n")
+            if not line.strip():
+                continue
+            parts = line.split("\t")
+            if len(parts) < 2:
+                raise ValueError(
+                    f"Bad plan line (need '<cluster_id>\\t<celltypes>'): {line!r}"
+                )
+            cid = parts[0].strip()
+            cts = [c.strip() for c in parts[1].split(",") if c.strip()]
+            jobs.append((cid, cts))
     return jobs
 
 

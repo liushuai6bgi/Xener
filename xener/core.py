@@ -82,6 +82,18 @@ class Xener:
         logger.info('KG species_organ_cell loaded: %s unique organs', len(self.KG.available_organ_set))
         logger.info('Xener initialized!')
 
+    def close(self):
+        """Release KG connection, BLAST DB handles, and other resources."""
+        if hasattr(self, 'KG') and self.KG is not None:
+            self.KG.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
+
     def run_from_yaml(self, yaml_file:str, save=True, configs:dict={}) -> tuple[dict, dict, dict]:
         '''
         Encapsulates the entire workflow for testing.
@@ -112,6 +124,7 @@ class Xener:
                  homolo_weight_key:str=None, multihomolo:bool=None,
                  organ:str=None, threshold:float=None, mapping_strict:int=0, ann_strict:int=0,
                  mode:Literal['node','path']=None, decay_factor:float=None,
+                 candidate_annotation:list[str]=None,
                  save:bool=True, **kv_ignore_args) -> tuple[dict, dict, dict]:
         '''
         Run the full annotation pipeline.
@@ -131,6 +144,7 @@ class Xener:
             decay_factor: Decay factor for graph weight propagation.
             multihomolo: Whether to allow multiple homologs per gene.
             homolo_weight_key: BLAST result column used as homology weight.
+            candidate_annotation: Restrict cell type output to these candidates.
             save: Whether to save intermediate results to outdir.
             **kv_ignore_args: Ignored parameters.
 
@@ -270,7 +284,8 @@ class Xener:
         annotation_info_path = outdir / 'annotation'
         cluster2celltype, cluster2max_initweight_celltype, celltype_weight, debug_annotation = self.cell_annotation(
             topk_markers, annotation_info_path, organ, threshold,
-            ann_strict, mode=mode, decay_factor=decay_factor)
+            ann_strict, mode=mode, decay_factor=decay_factor,
+            candidate_annotation=candidate_annotation)
         debug_params['cell_annotation'] = debug_annotation
         if save:
             celltype_weight_path = outdir / 'celltype_weight.csv'
@@ -455,30 +470,33 @@ class Xener:
         marker_list = markers['gene'].unique().tolist()
         logger.info('mapping %s genes from %s', len(marker_list), model_species)
         seq_file = extract_fasta_by_name(outdir, marker_list, non_model_fasta)
-        blastp_result = []
-        for species in model_species:
-            non_model_name = os.path.basename(non_model_fasta).split('.')[0]
-            blast_result_name = f'blastp4{non_model_name}2{species}.zip'
-            if self.blastp_result_path:
-                blast_result_path = os.path.join(self.blastp_result_path, blast_result_name)
-                if os.path.exists(blast_result_path):
-                    # If full gene alignment results exist, read directly
-                    data = pd.read_csv(blast_result_path, compression='zip')
-                    data = data[data['qseqid'].isin(marker_list)]
-                    blastp_result.append(data)
+        try:
+            blastp_result = []
+            for species in model_species:
+                non_model_name = os.path.basename(non_model_fasta).split('.')[0]
+                blast_result_name = f'blastp4{non_model_name}2{species}.zip'
+                if self.blastp_result_path:
+                    blast_result_path = os.path.join(self.blastp_result_path, blast_result_name)
+                    if os.path.exists(blast_result_path):
+                        # If full gene alignment results exist, read directly
+                        data = pd.read_csv(blast_result_path, compression='zip')
+                        data = data[data['qseqid'].isin(marker_list)]
+                        blastp_result.append(data)
+                    else:
+                        logger.warning('BLASTP cache %s not found for %s, running BLASTP instead.',
+                                       blast_result_name, species)
+                        blastp_result.append(
+                            blastp(seq_file, self.blastdb[species], outdir / f'blastp_{species}.csv', num_threads)
+                        )
                 else:
-                    logger.warning('BLASTP cache %s not found for %s, running BLASTP instead.',
-                                   blast_result_name, species)
+                    logger.info('run blastp for %s', species)
+                    # Align only the extracted genes
                     blastp_result.append(
                         blastp(seq_file, self.blastdb[species], outdir / f'blastp_{species}.csv', num_threads)
                     )
-            else:
-                logger.info('run blastp for %s', species)
-                # Align only the extracted genes
-                blastp_result.append(
-                    blastp(seq_file, self.blastdb[species], outdir / f'blastp_{species}.csv', num_threads)
-                )
-        os.remove(seq_file)
+        finally:
+            if os.path.exists(seq_file):
+                os.remove(seq_file)
         blast_result = pd.concat(blastp_result)
 
         # Filter alignment results
@@ -518,7 +536,8 @@ class Xener:
         
     def cell_annotation(self, blast_result,
             outdir:Path, organ=None, threshold:int=None, ann_strict:int=0,
-            mode:Literal['node','path']=None, decay_factor:float=None) -> tuple[dict, dict, pd.DataFrame, dict]:
+            mode:Literal['node','path']=None, decay_factor:float=None,
+            candidate_annotation:list[str]=None) -> tuple[dict, dict, pd.DataFrame, dict]:
         '''
         Annotate each cell cluster and save celltype weight information for each cluster.
         Parameters:
@@ -539,8 +558,10 @@ class Xener:
             'threshold': threshold,
             'mode': mode,
             'decay_factor': decay_factor,
+            'candidate_annotation': candidate_annotation,
         }
-        logger.info(f'>>>cell annotation organ[{organ}], threshold[{threshold}], mode[{mode}], decay_factor[{decay_factor}].')
+        logger.info('>>>cell annotation organ[%s], threshold[%s], mode[%s], decay_factor[%s], candidate_annotation[%s].',
+                    organ, threshold, mode, decay_factor, candidate_annotation)
         outdir = Path(outdir)
         os.makedirs(outdir, exist_ok=True)
         # Validate organ
@@ -567,7 +588,8 @@ class Xener:
                   weights, init_weights = self.cell_annotation_cluster_singlecluster(
                 blast_result[blast_result['group'] == group],
                 f'cluster_{group}', outdir, organ, ann_strict,
-                threshold=threshold, mode=mode, decay_factor=decay_factor)
+                threshold=threshold, mode=mode, decay_factor=decay_factor,
+                candidate_annotation=candidate_annotation)
 
             cluster_list += [group] * len(celltypes)
             celltype_list.extend(celltypes)
@@ -582,9 +604,10 @@ class Xener:
         
         return cluster2celltype, cluster2max_initweight_celltype, celltype_weight, debug_params
         
-    def cell_annotation_cluster_singlecluster(self, blast_result:pd.DataFrame, 
+    def cell_annotation_cluster_singlecluster(self, blast_result:pd.DataFrame,
             output_prefix, outdir:Path, organ=None, ann_strict:int=0,
-            threshold:int=None, mode:Literal['node','path']='node', decay_factor:float=0.9
+            threshold:int=None, mode:Literal['node','path']='node', decay_factor:float=0.9,
+            candidate_annotation:list[str]=None
         ) -> tuple[str, list[str], list[float]]:
         '''
         Annotate a single cluster with cell types.
@@ -607,7 +630,7 @@ class Xener:
         # Query knowledge graph based on homologs
         homolo_nodes = blast_result['homolo'].unique().tolist()
         _, celltype_nodes, homolo2celltype_matrix = self.KG.get_gene2celltype_kg(
-            homolo_nodes, organ)# Do not limit when querying knowledge graph
+            homolo_nodes, organ, candidate_type=candidate_annotation)
         
         if ann_strict < 0:
             logger.warning(f'ann_strict[{ann_strict}] is too loose!')
@@ -1047,10 +1070,14 @@ class Xener:
             X_coo = matrix.tocoo()
             for i, j, v in zip(X_coo.row, X_coo.col, X_coo.data):
                 if v == 0: continue
-                if target[j] in celltype2markers.keys():
-                    celltype2markers[target[j]].append(homolo2gene[source[i]])
+                gene = homolo2gene.get(source[i])
+                if gene is None:
+                    logger.warning('homolo %s from KG not found in local markers, skipping.', source[i])
+                    continue
+                if target[j] in celltype2markers:
+                    celltype2markers[target[j]].append(gene)
                 else:
-                    celltype2markers[target[j]] = [homolo2gene[source[i]]]
+                    celltype2markers[target[j]] = [gene]
             # Remove duplicates
             if len(celltype2markers) == 0:
                 raise Exception('no celltype2markers!')

@@ -63,7 +63,17 @@ def main():
                 for _, row in top_n.iterrows()
             ]
         }
-    suggestions = {int(cluster): info for cluster, info in suggestions.items()}
+    # Preserve cluster ID types as-is — celltype_weight.csv may contain
+    # non-numeric cluster labels (e.g. "Bcells", "Cluster_A"). Use str keys
+    # for JSON serialization; int keys only when all IDs are purely numeric.
+    def _try_int_key(k: str) -> str | int:
+        """Convert to int if purely numeric, else keep as str."""
+        try:
+            return int(k)
+        except ValueError:
+            return k
+
+    suggestions = {_try_int_key(c): info for c, info in suggestions.items()}
     # Print results
     print(f"\n=== Top-{args.topk} Cell Types per Cluster ===\n")
     for cluster, info in sorted(

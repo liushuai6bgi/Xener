@@ -155,14 +155,30 @@ def main():
         # from `xener`. Conflating the two would silently overstate how much of
         # the dataset was actually split. Coalesce downstream if you need a
         # fully-populated column: out["xener_refine"].fillna(out["xener"]).
-        refine_dir = Path(config["outdir"]) / "refine_output"
-        refine_csvs = sorted(glob(str(refine_dir / "refined_*.csv")))
-        if refine_csvs:
+        #
+        # Search for refined_*.csv in TWO locations:
+        #   a) subdir refine_output/  (as documented in refinement.md)
+        #   b) flat outdir/          (actual default of refine_cluster.py)
+        # Deduplicate by path so we never load the same file twice.
+        outdir_path = Path(config["outdir"])
+        candidate_dirs = [
+            outdir_path / "refine_output",
+            outdir_path,
+        ]
+        refine_csv_paths: list[str] = []
+        seen: set[str] = set()
+        for d in candidate_dirs:
+            for p in sorted(glob(str(d / "refined_*.csv"))):
+                absp = os.path.abspath(p)
+                if absp not in seen:
+                    seen.add(absp)
+                    refine_csv_paths.append(p)
+        if refine_csv_paths:
             refine_col = pd.Series(
                 pd.NA, index=out.index, dtype=object
             )
             n_refined_cells = 0
-            for csv in refine_csvs:
+            for csv in refine_csv_paths:
                 df = pd.read_csv(csv, index_col=0)
                 if "xener_refine" not in df.columns:
                     continue
@@ -171,7 +187,7 @@ def main():
                 n_refined_cells += len(common)
             out["xener_refine"] = refine_col
             n_unrefined = int(out["xener_refine"].isna().sum())
-            print(f"Merged {len(refine_csvs)} refinement CSV(s) into "
+            print(f"Merged {len(refine_csv_paths)} refinement CSV(s) into "
                   f"xener_refine ({n_refined_cells} cells labeled, "
                   f"{n_unrefined} left empty = not refined).")
 
@@ -190,6 +206,7 @@ def main():
     # first run below target still PASSES; to prove a soft-lever change helped,
     # re-run with the previous outdir as --baseline.
     from check_output import run_gate
+    log_fh.flush()
     ok, _ = run_gate(
         outdir=config["outdir"],
         annotation_csv=annot_path,            # None if the artifact write failed

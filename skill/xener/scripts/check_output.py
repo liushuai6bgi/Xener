@@ -87,16 +87,25 @@ def find_run_log(outdir: Path) -> Path | None:
     return None
 
 
-def parse_kg_miss_per_cluster(log_path: Path) -> dict[int, float]:
+def parse_kg_miss_per_cluster(log_path: Path, n_expected_clusters: int | None = None) -> dict[int, float]:
     """Parse `total X% homolos of organ[...] not in kg` lines from the log.
 
     Returns dict mapping cluster_id -> miss fraction (0.0 to 1.0).
     Cluster IDs come from the most recent "processing cluster N" header.
+
+    Parameters
+    ----------
+    log_path:
+        Path to the xener run log.
+    n_expected_clusters:
+        Number of clusters in the dataset (from celltype_weight.csv).
+        Pass this to enable a sanity check when KG miss count mismatches.
     """
-    text = log_path.read_text(errors="ignore")
+    text = log_path.read_text(errors="replace")
     cov: dict[int, float] = {}
     current_cluster: int | None = None
     in_annotation = False
+    unmatched_miss_lines = 0
     for line in text.splitlines():
         if "cell annotation organ" in line:
             in_annotation = True
@@ -107,8 +116,23 @@ def parse_kg_miss_per_cluster(log_path: Path) -> dict[int, float]:
         if m:
             current_cluster = int(m.group(1))
         m = re.search(r"total ([\d.]+) % homolos of organ\[[^\]]+\] not in kg", line)
-        if m and current_cluster is not None:
-            cov[current_cluster] = float(m.group(1)) / 100.0
+        if m:
+            if current_cluster is not None:
+                cov[current_cluster] = float(m.group(1)) / 100.0
+            else:
+                unmatched_miss_lines += 1
+
+    if unmatched_miss_lines:
+        print(f"[WARN] {unmatched_miss_lines} KG-miss line(s) could not be "
+              "assigned to a cluster (logged before any 'processing cluster' "
+              "header).", file=sys.stderr)
+
+    if n_expected_clusters is not None and cov and len(cov) != n_expected_clusters:
+        print(f"[WARN] KG-miss entries parsed for {len(cov)} cluster(s), but "
+              f"celltype_weight.csv has {n_expected_clusters} cluster(s). The "
+              "log format may have changed, or some clusters have no KG-miss "
+              "output.", file=sys.stderr)
+
     return cov
 
 
@@ -286,7 +310,18 @@ def run_gate(
     log_path = Path(log_path) if log_path else find_run_log(outdir)
     ct_path = outdir / "celltype_weight.csv"
 
-    cov = (parse_kg_miss_per_cluster(Path(log_path))
+    # Probe celltype_weight.csv for expected cluster count, so
+    # parse_kg_miss_per_cluster can sanity-check its results.
+    n_clusters_expected: int | None = None
+    if ct_path.exists():
+        try:
+            tmp = pd.read_csv(ct_path)
+            if "cluster" in tmp.columns:
+                n_clusters_expected = int(tmp["cluster"].nunique())
+        except Exception:
+            pass
+
+    cov = (parse_kg_miss_per_cluster(Path(log_path), n_clusters_expected)
            if log_path and Path(log_path).exists() else {})
     metrics = compute_metrics(cov, ct_path)
 

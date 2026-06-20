@@ -33,18 +33,18 @@ def __download_data(name:str, data_path:Path, url:str):
     try:
         import requests
 
-        resp = requests.get(url, stream=True, timeout=60)
-        resp.raise_for_status()
-        total = int(resp.headers.get("content-length", 0))
-        downloaded = 0
-        with open(data_path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if total:
-                        percent = min(downloaded * 100 // total, 100)
-                        logger.info('Download %s progress: %s%%', name, percent)
+        with requests.get(url, stream=True, timeout=60) as resp:
+            resp.raise_for_status()
+            total = int(resp.headers.get("content-length", 0))
+            downloaded = 0
+            with open(data_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total:
+                            percent = min(downloaded * 100 // total, 100)
+                            logger.info('Download %s progress: %s%%', name, percent)
         if total == 0:
             logger.info('Download %s progress: 100%%', name)
         logger.info('Download %s complete: %s bytes to %s', name, downloaded, data_path)

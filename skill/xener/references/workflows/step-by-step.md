@@ -46,7 +46,7 @@ python scripts/step3_mapping.py --input output/marker_weight.csv \
 ## Step 4: Top-k genes
 
 ```bash
-python scripts/step4_topk.py --input output/gene_homolo_weight.csv --k 30 \
+python scripts/step4_topk.py --input output/gene_homolo_weight.csv --top_num 30 \
     --multihomolo --outdir output/
 ```
 

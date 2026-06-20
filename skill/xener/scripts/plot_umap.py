@@ -374,7 +374,9 @@ def _load_adata(path, embedding_key):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[1])
-    parser.add_argument("--input", required=True, help="Path to .h5ad file")
+    parser.add_argument("--input", required=True,
+                        help="Path to .h5ad or annotation .csv file "
+                             "(CSV must have UMAP_1, UMAP_2 columns)")
     parser.add_argument(
         "--mode", required=True, choices=["annotation", "overview", "refine"],
         help="annotation: cluster | xener (2 panels). "

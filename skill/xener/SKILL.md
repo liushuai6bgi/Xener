@@ -1,12 +1,12 @@
 ---
 name: xener
-version: 0.1.10
+version: 0.1.13
 description: |
   Use this skill whenever the user wants to annotate single-cell RNA-seq data
   with cell type labels, especially in cross-species scenarios where the
   target species lacks a well-annotated reference. Xener maps marker genes
   from a non-model species to one or more model species via BLAST homology,
-  then propagates weights through a curated knowledge graph to predict cell
+  then propagates weights through a structured knowledge graph to predict cell
   types per cluster. Supports sub-cluster refinement with Moran's I gene
   filtering for splitting "mixed" clusters into subtypes.
 

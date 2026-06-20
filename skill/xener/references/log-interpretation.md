@@ -65,7 +65,7 @@ Python import and setup.
 | `raw_available[True/False]` | Whether `adata.raw` is set | Required for `use_raw=True` downstream. |
 | `use_raw[True/False]` | Whether `rank_genes_groups` ran on `.raw` | If `False` and you expected `True`, the h5ad was saved without raw. |
 | `Unavailable data! cann't find available counts.` | Both `.X` and `.raw.X` are non-sparse | Re-save the h5ad with raw counts in `.raw` (e.g. `adata.raw = adata` before writing). |
-| `highly_variable_genes[N]` | Triggered by `adata.shape[1] > 4000` (or `force_HVG=True`) | Informational; gene count reduced to `N`. |
+| `highly_variable_genes[N]` | Triggered when `HVG=True` and gene count exceeds `n_top_genes` (default 2000) | Informational; gene count reduced to `N`. |
 | `skip highly_variable_genes.` | Skipped because gene count is small | Informational. |
 
 ## Stage 3: `get_gene_weight` — numeric edge cases

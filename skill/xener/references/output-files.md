@@ -19,8 +19,8 @@ The pipeline writes the following files to `outdir/`.
 | `umap_annotation.png` | `plot_umap.py --mode annotation` | Side-by-side UMAP: cluster + Xener |
 | `umap_overview.png` | `plot_umap.py --mode overview` | One figure, up to 4 panels: cluster, `xener`, `xener_max`, `xener_refine` (unrefined cells gray) |
 | `umap_refine_cluster_{N}.png` | `plot_umap.py --mode refine` | UMAP highlighting cluster N + refine |
-| `refine_output/refined_{cluster_id}.csv` | `refine_cluster.py` | Refined annotation DataFrame (CSV) |
-| `refine_output/refined_{cluster_id}_gene2celltype.gexf` | `refine_cluster.py` | Gene→homolo→celltype graph (Gephi/Cytoscape/networkx) |
+| `refined_{cluster_id}.csv` | `refine_cluster.py` | Refined annotation DataFrame (CSV) |
+| `refined_{cluster_id}_gene2celltype.gexf` | `refine_cluster.py` | Gene→homolo→celltype graph (Gephi/Cytoscape/networkx) |
 
 ## Annotation columns (`{dataset}_annotation.csv`)
 
@@ -86,5 +86,4 @@ is for manual inspection.
 | Mean `total X% homolos of organ[...] not in kg` across clusters | < 30% | > 30% | Add a more well-annotated `model_species` (often the target species itself) |
 | Tail: clusters with > 80% KG miss | < 5% of clusters | > 5% | Same as above |
 | Number of unique top-1 cell types across clusters | 8-15+ for typical plant/animal atlases | < 5 unique types for > 10 clusters | Same as above |
-| Per-cluster top-1 `init_weight` | > 50 for n_cells > 200 | One or more clusters near zero | Re-run step 5 with `--mode node` for those clusters, or trigger refinement |
 | Clusters with no `celltype_weight` rows | 0 | > 0 | Investigate: organ filter, BLAST stringency, or KG coverage |

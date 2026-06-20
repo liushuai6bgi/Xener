@@ -114,6 +114,14 @@ def build_xener(init_config=None):
             "usr": cfg.get("KG_usr"),
             "pwd": cfg.get("KG_pwd"),
         }
+    else:
+        # Detect partial KG credentials that would be silently ignored.
+        orphan_keys = [k for k in ("KG_usr", "KG_pwd") if cfg.get(k)]
+        if orphan_keys:
+            print(f"[WARN] init-config: {orphan_keys} provided but KG_url is "
+                  "missing — KG credentials are ignored. Set KG_url to use "
+                  "a custom Knowledge Graph, or remove the orphan keys to "
+                  "keep the public cloud KG.")
 
     return Xener(
         kg_kwargs=kg_kwargs,

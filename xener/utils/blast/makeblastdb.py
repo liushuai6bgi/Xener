@@ -56,13 +56,17 @@ def makeblastdb_singlefile(input_file, output_path, dbtype) -> str:
     """
     file_name = os.path.basename(input_file).split('.')[0]
     deduplicate_fasta_by_length(output_path / 'tmp.fasta', input_file)
-    cmd_makeblastdb = cmd_makeblastdb_base.format(
-        input_file=output_path / 'tmp.fasta',
-        outdir=output_path / file_name,
-        dbtype=dbtype)
-    logger.debug(f'makeblastdb command: {cmd_makeblastdb}')
+    cmd = [
+        "makeblastdb",
+        "-in", str(output_path / 'tmp.fasta'),
+        "-out", str(output_path / file_name),
+        "-dbtype", dbtype,
+        "-parse_seqids",
+        "-hash_index",
+    ]
+    logger.debug('makeblastdb command: %s', ' '.join(cmd))
     t0 = time.time()
-    result = subprocess.run(cmd_makeblastdb, stderr=subprocess.PIPE, shell=True)
+    result = subprocess.run(cmd, stderr=subprocess.PIPE)
     elapsed = time.time() - t0
     if result.returncode != 0:
         logger.error('makeblastdb failed for %s (returncode=%s) after %.2fs: %s',

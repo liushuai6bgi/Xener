@@ -21,21 +21,15 @@ class KG_HttpBackend(KGBackend):
         Args:
             url: HTTP service root address (e.g., http://localhost:8080).
             auth: (username, password) tuple, default None.
+
+        Note: species_organ_cell is NOT loaded here. KGClient.__init__
+        calls get_species_organ_cell() once and owns the derived caches
+        (available_organ_dict / available_organ_set), avoiding a redundant
+        HTTP call that the old code made.
         """
         self.url = url.rstrip("/")
         self._session = requests.Session()
-
         logger.info('KG_HttpBackend connecting to %s', self.url)
-        t0 = time.time()
-        self.species_organ_cell = self.get_species_organ_cell()
-        logger.info('KG_HttpBackend species_organ_cell loaded in %.2fs (%s rows)',
-                    time.time() - t0, len(self.species_organ_cell))
-
-        # 统计所有可用的组织
-        self.available_organ_dict = {
-            organ.lower(): organ for organ in self.species_organ_cell["organ"].unique()
-        }
-        self.available_organ_set = set(self.available_organ_dict.keys())
 
     def _request(self, method: str, path: str, **kwargs) -> requests.Response:
         """Send an HTTP request."""
