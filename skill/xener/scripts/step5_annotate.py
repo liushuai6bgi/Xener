@@ -26,7 +26,7 @@ def main():
     parser.add_argument("--input", required=True, help="Path to topk_markers.csv")
     parser.add_argument("--outdir", required=True, help="Output directory for annotations")
     parser.add_argument("--organ", default=None, help="Organ name (e.g., leaf, root)")
-    parser.add_argument("--threshold", type=int, default=None,
+    parser.add_argument("--threshold", type=float, default=None,
                         help="Cell type confidence threshold")
     parser.add_argument("--candidate-annotation", nargs="*", default=None,
                         help="Restrict cell types to these candidates")

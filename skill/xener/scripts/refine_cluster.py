@@ -138,6 +138,7 @@ def refine_one(annor, adata, markers_df, cluster_id, celltypes, args):
         moranI_threshold=args.moran_i,
         split_method=args.split_method,
         markergene_method=args.markergene_method,
+        strict=args.strict,
     )
     return geneCount, diffgeneCount, annotation, gene2celltype_g
 
@@ -179,7 +180,10 @@ def merge_into_annotation(annotation_csv, collected, key_added):
 
     ann = pd.read_csv(annotation_csv, index_col=0)
     # Start the column as all-NaN; only refined cells receive a value.
-    refine_col = pd.Series(np.nan, index=ann.index, dtype=object)
+    if key_added not in ann.columns:
+        refine_col = pd.Series(np.nan, index=ann.index, dtype=object)
+    else:
+        refine_col = ann[key_added].copy()
 
     n_cells = 0
     n_clusters = 0

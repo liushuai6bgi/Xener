@@ -88,7 +88,7 @@ def main():
     # Save to JSON if outdir provided
     if args.outdir:
         os.makedirs(args.outdir, exist_ok=True)
-        output_path = os.path.join(args.outdir, "top_celltypes.json")
+        output_path = os.path.join(args.outdir, "refine_suggestions.json")
         with open(output_path, "w") as f:
             json.dump(suggestions, f, indent=2)
         print(f"\nTop cell types saved to {output_path}")

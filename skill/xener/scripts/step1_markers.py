@@ -24,8 +24,6 @@ def main():
     parser.add_argument("--input", required=True, help="Path to .h5ad file")
     parser.add_argument("--cluster-key", default="leiden", help="Cluster column in adata.obs")
     parser.add_argument("--outdir", required=True, help="Output directory")
-    parser.add_argument("--preprocess", action="store_true", help="Run quality control preprocessing")
-    parser.add_argument("--batch-key", default=None, help="Batch column for batch correction")
     add_init_config_arg(parser)
     args = parser.parse_args()
 
