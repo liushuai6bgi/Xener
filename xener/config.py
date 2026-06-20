@@ -10,7 +10,8 @@ _DATA_URL = {
 _XENER_DATA_DIR = Path.home() / ".xener" / "data"
 
 def _ensure_data(DATA_KEY:str=None, force_update:bool=False):
-    assert DATA_KEY is None or DATA_KEY in _DATA_URL.keys(), "Invalid data key"
+    if DATA_KEY is not None and DATA_KEY not in _DATA_URL:
+        raise ValueError(f"Invalid data key: {DATA_KEY}")
 
     _XENER_DATA_DIR.mkdir(parents=True, exist_ok=True)
     if DATA_KEY is None:

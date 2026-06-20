@@ -30,7 +30,11 @@ def blastp(query_fasta:Path, db_path:Path, output_file:Path, num_threads:int=Non
     tmp_output_file = output_file.with_suffix('.csv')
     if not os.path.exists(output_file):
         if num_threads is None:
-            num_threads = int(os.cpu_count() * 0.7)
+            cpu_count = os.cpu_count()
+            if cpu_count is None:
+                num_threads = 1
+            else:
+                num_threads = max(1, int(cpu_count * 0.7))
         kwargs.setdefault('evalue', 1e-5)
         cmd_blastp = cmd_blastp_base.format(
             query_fasta=query_fasta, db_path=db_path,

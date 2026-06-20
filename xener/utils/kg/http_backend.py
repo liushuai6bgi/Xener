@@ -49,7 +49,10 @@ class KG_HttpBackend(KGBackend):
             raise
         elapsed = time.time() - t0
         if not response.ok:
-            detail = response.json().get("detail", response.text) if response.content else response.text
+            try:
+                detail = response.json().get("detail", response.text) if response.content else response.text
+            except Exception:
+                detail = response.text if response.text else f"HTTP {response.status_code}"
             logger.error('KG HTTP %s %s returned %s in %.2fs: %s',
                          method, path, response.status_code, elapsed, detail)
             raise requests.HTTPError(detail, response=response)

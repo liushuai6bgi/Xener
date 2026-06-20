@@ -137,27 +137,27 @@ def build_graph_from_adjust_matrix(matrix:sp.csr_matrix, source_names:list[str],
     # Add nodes
 
     X_coo = matrix.tocoo()
-    for col, raw, v in zip(X_coo.row, X_coo.col, X_coo.data):
+    for row_idx, col_idx, v in zip(X_coo.row, X_coo.col, X_coo.data):
         if v == 0:  # Skip zero-weight edges
             continue
-        if not graph.has_node(source_names[col]):
-            attr = source_attr[col] if isinstance(source_attr,list) else {}
-            graph.add_node(source_names[col], **attr)
-        if not graph.has_node(target_names[raw]):
-            attr = target_attr[raw] if isinstance(target_attr,list) else {}
-            graph.add_node(target_names[raw], **attr)
+        if not graph.has_node(source_names[row_idx]):
+            attr = source_attr[row_idx] if isinstance(source_attr,list) else {}
+            graph.add_node(source_names[row_idx], **attr)
+        if not graph.has_node(target_names[col_idx]):
+            attr = target_attr[col_idx] if isinstance(target_attr,list) else {}
+            graph.add_node(target_names[col_idx], **attr)
 
-        graph.add_edge(source_names[col], target_names[raw], **{edge_weight_key:float(v)})
+        graph.add_edge(source_names[row_idx], target_names[col_idx], **{edge_weight_key:float(v)})
     if mode == 'n':
         for node in source_names:
             if not graph.has_node(node):  # Add missing nodes
-                col = source_names.index(node)
-                attr = source_attr[col] if isinstance(source_attr,list) else {}
+                idx = source_names.index(node)
+                attr = source_attr[idx] if isinstance(source_attr,list) else {}
                 graph.add_node(node, **attr)
         for node in target_names:
             if not graph.has_node(node):  # Add missing nodes
-                raw = target_names.index(node)
-                attr = target_attr[raw] if isinstance(target_attr,list) else {}
+                idx = target_names.index(node)
+                attr = target_attr[idx] if isinstance(target_attr,list) else {}
                 graph.add_node(node, **attr)
     return graph
 

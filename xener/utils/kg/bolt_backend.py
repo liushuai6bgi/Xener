@@ -110,7 +110,11 @@ class KG_Neo4j_BoltBackend(KGBackend):
         t0 = time.time()
         with self.driver.session() as session:
             results = session.run(cypher)
-            data = results.value()[0]
+            values = results.value()
+            if not values:
+                logger.warning('KG get_genecount_kg(celltype=%s) -> empty result, returning 0', celltype)
+                return 0
+            data = values[0]
         logger.info('KG get_genecount_kg(celltype=%s) -> %s in %.3fs', celltype, data, time.time() - t0)
         return data
 
@@ -130,7 +134,11 @@ class KG_Neo4j_BoltBackend(KGBackend):
         t0 = time.time()
         with self.driver.session() as session:
             results = session.run(cypher)
-            data = results.value()[0]
+            values = results.value()
+            if not values:
+                logger.warning('KG get_celltypecount_kg(gene=%s) -> empty result, returning 0', gene)
+                return 0
+            data = values[0]
         logger.info('KG get_celltypecount_kg(gene=%s) -> %s in %.3fs', gene, data, time.time() - t0)
         return data
 

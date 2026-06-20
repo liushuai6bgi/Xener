@@ -42,7 +42,7 @@ class KGClient(KGBackend):
         elif isinstance(organ, list):
             organ = [self.check_organ(x) for x in organ]
         return organ
-    @staticmethod
+    @classmethod
     def init_from_yaml(cls, yaml_file: str) -> "KGClient":
         """
         Initialize from a YAML configuration file.
@@ -63,12 +63,12 @@ class KGClient(KGBackend):
     @staticmethod
     def from_bolt(url: str, auth: tuple) -> "KGClient":
         """Create client from a Bolt connection."""
-        return KGClient(backend=KG_Neo4j_BoltBackend(url=url, auth=auth))
+        return KGClient(url, usr=auth[0] if auth else None, pwd=auth[1] if auth else None)
 
     @staticmethod
     def from_http(url: str, auth: tuple = None) -> "KGClient":
         """Create client from an HTTP connection."""
-        return KGClient(backend=KG_HttpBackend(url=url, auth=auth))
+        return KGClient(url)
 
     def get_genecount_kg(self, celltype: str) -> int:
         return self._backend.get_genecount_kg(celltype)

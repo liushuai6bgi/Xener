@@ -32,9 +32,8 @@ class Xener:
     
     @classmethod
     def init_from_yaml(cls, yaml_file:str, **kwargs):
-        f =  open(yaml_file, 'r', encoding='utf-8')
-        config = yaml.load(f, Loader=yaml.FullLoader)
-        f.close()
+        with open(yaml_file, 'r', encoding='utf-8') as f:
+            config = yaml.load(f, Loader=yaml.FullLoader)
         config.update(kwargs)
 
         kg_kwargs = {
@@ -324,11 +323,11 @@ class Xener:
         # Get gene ranking table = number of clusters * number of genes
         markers = sc.get.rank_genes_groups_df(adata, group=None, key='rank_genes_groups')
         
-        # filter markers
-        markers = markers[(markers['logfoldchanges'] > 0.25) & 
-                (markers['pvals_adj'] < 0.05) & 
-                (markers['pct_nz_group'] > 0.1)]
-        return markers.drop(columns=['scores']), debug_params
+        # filter markers. If the data quality is poor, then do not enable this part of the code.
+        # markers = markers[(markers['logfoldchanges'] > 0.25) & 
+        #         (markers['pvals_adj'] < 0.05) & 
+        #         (markers['pct_nz_group'] > 0.1)]
+        return markers.drop(columns=['scores'], errors='ignore'), debug_params
         
     def get_gene_weight(self, markers:pd.DataFrame, marker_weight_method:Literal['prod','sum']=None) -> tuple[pd.DataFrame, dict]:
         marker_weight_method = self._default_config['marker_weight_method'] if marker_weight_method is None else marker_weight_method
@@ -467,6 +466,12 @@ class Xener:
                     data = pd.read_csv(blast_result_path, compression='zip')
                     data = data[data['qseqid'].isin(marker_list)]
                     blastp_result.append(data)
+                else:
+                    logger.warning('BLASTP cache %s not found for %s, running BLASTP instead.',
+                                   blast_result_name, species)
+                    blastp_result.append(
+                        blastp(seq_file, self.blastdb[species], outdir / f'blastp_{species}.csv', num_threads)
+                    )
             else:
                 logger.info('run blastp for %s', species)
                 # Align only the extracted genes
@@ -503,8 +508,8 @@ class Xener:
         elif mapping_strict == 1:
             max_vals = merged_data.groupby(['group', 'gene'])['homolo_weight'].transform('max')
             merged_data = merged_data[max_vals == merged_data['homolo_weight']]
-            drop_dup_shape = merged_data[['group', 'gene']].drop_duplicates().shape[1]
-            if merged_data.shape[1] != drop_dup_shape:
+            drop_dup_shape = merged_data[['group', 'gene']].drop_duplicates().shape[0]
+            if merged_data.shape[0] != drop_dup_shape:
                 # multiple mapping
                 logger.warning('multiple mapping detected!')
         
@@ -540,10 +545,9 @@ class Xener:
         os.makedirs(outdir, exist_ok=True)
         # Validate organ
         if organ is not None:
-            checked_organ = self.KG.check_organ(organ)
-            if checked_organ is None:
-                logger.warning('organ %s is unavailable, set to None.', organ)
-            organ = checked_organ
+            organ = self.KG.check_organ(organ)
+            if organ is None:
+                logger.warning('organ is unavailable, set to None.')
 
         n_clusters = blast_result['group'].nunique()
         logger.info('cell_annotation: %s clusters to annotate, input blast_result has %s (group,gene,homolo) rows.',
@@ -983,9 +987,10 @@ class Xener:
             sc.pp.neighbors(adata)
 
         # Validate organ
-        organ = self.KG.check_organ(organ)
-        if organ is None:
-            logger.warning("organ is unavailable, set to None.")
+        if organ is not None:
+            organ = self.KG.check_organ(organ)
+            if organ is None:
+                logger.warning('organ is unavailable, set to None.')
 
         if celltype_geneCount_gene is None:
             # Get mapping from homologous gene to marker
@@ -1011,7 +1016,7 @@ class Xener:
             for homolo, gene in homolo2gene.items():
                 sub_g_gene2homolo.add_node('homolo_'+homolo, **{'name':homolo,'weight':0,'type':'homolo'})
                 sub_g_gene2homolo.add_node('gene_'+gene, **{'name':gene,'weight':0,'type':'gene'})
-                sub_g_gene2homolo.add_edge('gene'+gene, 'homolo_'+homolo)
+                sub_g_gene2homolo.add_edge('gene_'+gene, 'homolo_'+homolo)
             # Look up marker genes in knowledge graph for each cell type
             source, target, matrix = self.KG.get_gene2celltype_kg(
                 homolo_nodes=list(homolo2gene.keys()),
