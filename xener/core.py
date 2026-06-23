@@ -582,7 +582,12 @@ class Xener:
 
         cluster2celltype = dict()
         cluster2max_initweight_celltype = dict()
+        _ANNOT_INTER_CLUSTER_DELAY = 0.5  # seconds — prevents KG routing overload
+        _first = True
         for group in blast_result['group'].unique():
+            if not _first:
+                time.sleep(_ANNOT_INTER_CLUSTER_DELAY)
+            _first = False
             logger.info('processing cluster %s', group)
             cluster2celltype[group], cluster2max_initweight_celltype[group], celltypes,\
                   weights, init_weights = self.cell_annotation_cluster_singlecluster(

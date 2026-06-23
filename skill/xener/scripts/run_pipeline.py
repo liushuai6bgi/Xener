@@ -206,7 +206,6 @@ def main():
     # first run below target still PASSES; to prove a soft-lever change helped,
     # re-run with the previous outdir as --baseline.
     from check_output import run_gate
-    log_fh.flush()
     ok, _ = run_gate(
         outdir=config["outdir"],
         annotation_csv=annot_path,            # None if the artifact write failed

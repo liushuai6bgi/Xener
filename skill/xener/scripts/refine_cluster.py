@@ -50,6 +50,7 @@ JSON:                     [{"cluster": 3, "celltype": ["a","b"]}, ...]
 import argparse
 import json
 import os
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -295,7 +296,10 @@ def main():
     # ---- refine every job against the shared resources ----
     collected = []      # list of (cluster_id, annotation_df) for merging
     failures = []
+    _BATCH_INTER_CLUSTER_DELAY = 0.5  # seconds — prevents KG routing overload
     for i, (cid, cts) in enumerate(jobs, 1):
+        if i > 1:
+            time.sleep(_BATCH_INTER_CLUSTER_DELAY)
         tag = f"[{i}/{len(jobs)}] cluster {cid}"
         try:
             print(f"=== {tag}: {','.join(cts)} ===")
