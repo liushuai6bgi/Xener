@@ -345,4 +345,4 @@ For agent usage details, refer to [skill/xener/SKILL.md](skill/xener/SKILL.md).
 
 [PyPI](https://pypi.org/project/xener/): https://pypi.org/project/xener
 
-[Github](https://github.com/liushuai6bgi/Xener): https://github.com/liushuai6bgi/Xener
+[Github](https://github.com/BGIResearch/Xener): https://github.com/BGIResearch/Xener
