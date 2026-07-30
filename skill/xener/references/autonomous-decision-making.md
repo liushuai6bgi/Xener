@@ -38,7 +38,7 @@ of biological / experimental choices.
    qualification), treat the task as **complete-annotation** mode —
    see "Completeness vs. demonstration" below — and plan to refine
    every eligible cluster, not a representative subset.
-2. **Inspect the h5ad file** with `scripts/inspect_h5ad.py <path_to_h5ad>` —
+2. **Inspect the h5ad file** with `scripts/inspect_h5ad.py --input <path_to_h5ad>` —
    see `references/workflows/inspection.md`. It runs once and reports
    cluster_key, species hints, organ hints, cluster sizes, and recommended
    `top_num`. Do **not** use ad-hoc `sc.read()` commands to inspect

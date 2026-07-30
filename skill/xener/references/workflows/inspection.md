@@ -17,8 +17,8 @@ Run the dedicated inspection script. It loads the (often multi-GB) h5ad
 **exactly once** and prints every field you need to compose a config:
 
 ```bash
-python scripts/inspect_h5ad.py <path_to_h5ad>
-python scripts/inspect_h5ad.py <path_to_h5ad> --json   # machine-readable
+python scripts/inspect_h5ad.py --input <path_to_h5ad>
+python scripts/inspect_h5ad.py --input <path_to_h5ad> --json   # machine-readable
 ```
 
 It reports: shape; obs columns + cardinality; **recommended `cluster_key`**

@@ -197,7 +197,7 @@ waiting is event-driven (notification / `TaskOutput` / `ScheduleWakeup`), never
 The target `.h5ad` is frequently multi-GB and a single read (~30-45 s for ~1 GB)
 is the **dominant I/O cost of the whole workflow**. Treat each read as expensive.
 
-- **Inspection is a single command:** `python scripts/inspect_h5ad.py <h5ad>`.
+- **Inspection is a single command:** `python scripts/inspect_h5ad.py --input <h5ad>`.
   It loads the file once and prints everything needed to compose a config
   (cluster_key, species hint, organ hint, cluster sizes, recommended `top_num`,
   `.X`/raw sanity). **Do not** follow it with ad-hoc `python -c "import scanpy;

@@ -20,8 +20,8 @@ never `import xener`, and needs no --init-config (pure h5ad inspection, no KG /
 BLAST).
 
 Usage:
-    python scripts/inspect_h5ad.py edf.h5ad
-    python scripts/inspect_h5ad.py edf.h5ad --json     # machine-readable
+    python scripts/inspect_h5ad.py --input edf.h5ad
+    python scripts/inspect_h5ad.py --input edf.h5ad --json     # machine-readable
 """
 
 import argparse
@@ -232,15 +232,16 @@ def print_human(r):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("h5ad", help="Path to the .h5ad file to inspect")
+    ap.add_argument("--input", required=True,
+                    help="Path to the .h5ad file to inspect")
     ap.add_argument("--json", action="store_true",
                     help="Emit the report as JSON instead of human-readable text")
     args = ap.parse_args()
 
     try:
-        report = inspect(args.h5ad)
+        report = inspect(args.input)
     except Exception as e:
-        print(f"[ERROR] failed to inspect {args.h5ad}: {e}", file=sys.stderr)
+        print(f"[ERROR] failed to inspect {args.input}: {e}", file=sys.stderr)
         sys.exit(1)
 
     if args.json:
