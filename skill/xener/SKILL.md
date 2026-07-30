@@ -142,7 +142,7 @@ All init keys are optional and may instead be inlined into `config.yaml`. See
 ## Mandatory rules (read `references/mandatory-rules.md` first)
 
 The full list of do's and don'ts is in `references/mandatory-rules.md`. The
-three most important constraints:
+most important constraints:
 
 - **Use ONLY scripts in `scripts/`. Never `import xener` directly.**
 - **Never pass config via stdin.** Always use a config file path.
@@ -151,6 +151,12 @@ three most important constraints:
   gate — never change one just to pass the gate (§11). `model_species` is NOT
   hard: adding a more distant, KG-rich species to rescue coverage is a legal
   soft fix.**
+- **Always call xener methods with keyword arguments** (`annor.get_markers(adata=adata, ...)`,
+  never `annor.get_markers(adata, ...)`). Every script in `scripts/` follows this
+  convention, and §12 of `mandatory-rules.md` explains why — see also the
+  `allowed-tools` enumeration above, which only lets the agent invoke those
+  scripts as CLIs (where the agent never sees the call form anyway). When
+  editing a script, treat any positional xener call as a bug to convert.
 
 ## Reference docs (load on demand)
 

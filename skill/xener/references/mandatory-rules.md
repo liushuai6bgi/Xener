@@ -326,3 +326,44 @@ to revert.
 
 All of these mean: you are trying to move a SOFT signal by breaking a HARD
 constraint. Keep the constraint. Improve via soft levers and document the result.
+
+## 12. Pass keyword arguments to every xener API call
+
+Inside every script under `scripts/`, every call into the xener library
+(`Xener`-class methods like `get_markers`, `get_gene_weight`, `mapping`,
+`get_topk_gene`, `cell_annotation`, `refine_single_cluster`, `run_from_yaml`,
+plus the `build_xener()` helper from `_xener_init.py`) MUST use Python keyword
+arguments (`arg=value`), never positional ones.
+
+```python
+# REQUIRED
+markers, _ = annor.get_markers(adata=adata, cluster_key="leiden")
+topk, _ = annor.get_topk_gene(
+    homolo_weights=homolo_weights,
+    top_num=30,
+    multihomolo=True,
+)
+annor = build_xener(init_config=args.init_config)
+
+# FORBIDDEN
+markers, _ = annor.get_markers(adata, "leiden")
+topk, _ = annor.get_topk_gene(homolo_weights, 30, True)
+annor = build_xener(args.init_config)
+```
+
+**Why**: xener's API surface is wide and growing, with several parameters that
+share a similar type (file paths, int thresholds, bool flags). A positional
+call already breaks the moment the upstream signature adds an optional kwarg in
+the middle of the parameter list, and a human reviewer cannot tell from a line
+like `annor.mapping(markers, "/data/foo.fa", ["Brapa"], "/tmp/out")` which
+`str` is the FASTA, the outdir, or something else entirely. The keyword form
+makes every call self-documenting and forward-compatible with new optional
+parameters that the library may add between releases.
+
+The only exceptions are calls into third-party libraries (`pandas.read_csv`,
+`scanpy.read`, `matplotlib`, `networkx`, ...); their calling conventions are
+fixed by upstream and changing them is out of scope. The rule covers *every*
+call where xener is on the left side of the dot.
+
+When editing a script, treat any existing positional form as a bug to be
+converted. New scripts MUST be written in this form from the start.

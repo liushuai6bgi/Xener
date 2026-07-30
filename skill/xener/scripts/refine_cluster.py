@@ -129,8 +129,8 @@ def refine_one(annor, adata, markers_df, cluster_id, celltypes, args):
     """Run a single cluster refinement against already-loaded shared resources."""
     warn_if_truncated(markers_df, cluster_id)
     geneCount, diffgeneCount, annotation, gene2celltype_g = annor.refine_single_cluster(
-        adata,
-        markers_df,
+        adata=adata,
+        markers_df=markers_df,
         cluster_key=args.cluster_key,
         cluster_id=cluster_id,
         candidate_celltype=celltypes,
@@ -291,7 +291,7 @@ def main():
         print("Computing neighbors...")
         sc.pp.neighbors(adata)
 
-    annor = build_xener(args.init_config)  # connects to the KG once, reused for every cluster
+    annor = build_xener(init_config=args.init_config)  # connects to the KG once, reused for every cluster
 
     # ---- refine every job against the shared resources ----
     collected = []      # list of (cluster_id, annotation_df) for merging

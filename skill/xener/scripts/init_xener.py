@@ -58,7 +58,7 @@ def main():
 
     print("Initializing Xener...")
     try:
-        annor = build_xener(args.init_config)
+        annor = build_xener(init_config=args.init_config)
     except Exception as e:
         print(f"[ERROR] Xener initialization failed: {e}", file=sys.stderr)
         print(

@@ -20,7 +20,7 @@ def main():
     add_init_config_arg(parser)
     args = parser.parse_args()
 
-    annor = build_xener(args.init_config)
+    annor = build_xener(init_config=args.init_config)
     species = annor.blastdb.keys()
 
     print(f"Available species ({len(species)}):")

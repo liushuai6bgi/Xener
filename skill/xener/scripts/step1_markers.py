@@ -30,10 +30,10 @@ def main():
     os.makedirs(args.outdir, exist_ok=True)
 
     adata = sc.read(args.input)
-    annor = build_xener(args.init_config)
+    annor = build_xener(init_config=args.init_config)
 
     markers, debug_markers = annor.get_markers(
-        adata,
+        adata=adata,
         cluster_key=args.cluster_key,
     )
 

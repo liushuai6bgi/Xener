@@ -100,8 +100,10 @@ def main():
     sys.stdout = _Tee(_real_stdout, log_fh)
 
     try:
-        annor = build_xener(init_config)
-        cluster2celltype, cluster2max, debug_params = annor.run_from_yaml(args.config)
+        annor = build_xener(init_config=init_config)
+        cluster2celltype, cluster2max, debug_params = annor.run_from_yaml(
+            yaml_path=args.config,
+        )
 
         print("Pipeline complete.")
         print("Cluster annotations:", cluster2celltype)
